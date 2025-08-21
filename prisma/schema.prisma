@@ -1,0 +1,173 @@
+// ---------- Generators & Datasource ----------
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+enum Role {
+  SUPERADMIN
+  ADMIN
+  GUARDIA
+  RESIDENTE
+}
+
+enum SwitchState {
+  ON
+  OFF
+}
+
+enum ActivationAction {
+  ON
+  OFF
+  AUTO_OFF
+}
+
+enum ActivationResult {
+  ACCEPTED
+  REJECTED
+  FAILED
+}
+
+// ---------- Models ----------
+model Urbanization {
+  id         String  @id @default(uuid())
+  name       String  @unique
+  maxUsers   Int?    // Solo SUPERADMIN podrá cambiar esto (lógica en servicio)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  users   User[]
+  sirens  Siren[]
+  groups  Group[]
+}
+
+model User {
+  id             String   @id @default(uuid())
+  keycloakId     String?  @unique // se rellenará en Fase 3 (Keycloak)
+  email          String   @unique
+  username       String?  @unique
+  role           Role
+
+  // Dirección del residente (a nivel de usuario)
+  etapa          String?
+  manzana        String?
+  villa          String?
+
+  alicuota       Boolean  @default(true)
+
+  urbanizationId String?
+  urbanization   Urbanization? @relation(fields: [urbanizationId], references: [id], onDelete: SetNull)
+
+  // Relaciones
+  sessions       UserSession[]
+  assignments    Assignment[]
+  activationLogs ActivationLog[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Siren {
+  id             String   @id @default(uuid())
+  deviceId       String   @unique // = MQTT ClientID
+  apiKey         String            // = MQTT password (NO exponer en tópicos)
+  ip             String?
+  online         Boolean  @default(false)
+  relay          SwitchState @default(OFF) // Regla MVP: relay=ON => siren=ON
+  sirenState     SwitchState @default(OFF)
+  lastSeen       DateTime?
+
+  lat            Float?
+  lng            Float?
+
+  urbanizationId String
+  urbanization   Urbanization @relation(fields: [urbanizationId], references: [id], onDelete: Cascade)
+
+  // Relaciones
+  groups     GroupMember[]
+  residents  Assignment[]
+  logs       ActivationLog[]
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([urbanizationId])
+}
+
+model Group {
+  id             String   @id @default(uuid())
+  name           String
+  urbanizationId String
+  urbanization   Urbanization @relation(fields: [urbanizationId], references: [id], onDelete: Cascade)
+  members        GroupMember[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([urbanizationId, name]) // nombre único por urbanización
+}
+
+model GroupMember {
+  id       String @id @default(uuid())
+  groupId  String
+  sirenId  String
+  group    Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  siren    Siren  @relation(fields: [sirenId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([groupId, sirenId])
+  @@index([sirenId])
+}
+
+model Assignment {
+  id       String @id @default(uuid())
+  userId   String
+  sirenId  String
+  active   Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  siren  Siren @relation(fields: [sirenId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sirenId])
+  @@index([sirenId])
+}
+
+model ActivationLog {
+  id        String           @id @default(uuid())
+  sirenId   String
+  userId    String?
+  action    ActivationAction
+  result    ActivationResult
+  reason    String?
+  ip        String?
+  createdAt DateTime         @default(now())
+
+  siren     Siren            @relation(fields: [sirenId], references: [id], onDelete: Cascade)
+  user      User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([sirenId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model UserSession {
+  id                 String   @id @default(uuid())
+  userId             String
+  keycloakSessionId  String   @unique
+  userAgent          String?
+  device             String?
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  revokedAt          DateTime?
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, active])
+}

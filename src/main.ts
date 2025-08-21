@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import { ConfigService } from '@nestjs/config';
 import { ValidationPipe } from '@nestjs/common';
+import { PrismaService } from './data/prisma.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -39,6 +40,10 @@ async function bootstrap() {
       forbidUnknownValues: false,
     }),
   );
+
+  // ⬇️ habilita cierre ordenado
+  const prisma = app.get(PrismaService);
+  await prisma.enableShutdownHooks(app);
 
   const port = config.get<number>('PORT') ?? 4000;
   await app.listen(port);
