@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import axios from 'axios';
 import * as jose from 'jose';
+import { URLSearchParams } from 'url';
 
 type OIDCConfig = {
   issuer: string;
@@ -10,12 +11,32 @@ type OIDCConfig = {
   end_session_endpoint?: string;
 };
 
+export type KeycloakTokenResponse = {
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
+  refresh_expires_in: number;
+  token_type: 'Bearer';
+  session_state?: string;
+  scope?: string;
+};
+
+export type UserFromToken = {
+  id: string;
+  username?: string;
+  email?: string;
+  name?: string;
+  roles?: string[];
+};
+
 @Injectable()
 export class OidcService {
   private readonly logger = new Logger(OidcService.name);
   private discovery?: OIDCConfig;
   // jose v5/6: tipa el JWKS con ReturnType de createRemoteJWKSet
   private jwks?: ReturnType<typeof jose.createRemoteJWKSet>;
+
+  // ========= DISCOVERY / JWKS / VERIFY (tu lógica existente, preservada) =========
 
   private issuerUrl() {
     const base = process.env.KEYCLOAK_BASE_URL!;
@@ -62,5 +83,91 @@ export class OidcService {
     });
 
     return { payload: result.payload, protectedHeader: result.protectedHeader };
+  }
+
+  // ========================== TOKEN ENDPOINTS (nuevo) ==========================
+
+  private tokenEndpoint() {
+    return `${this.issuerUrl()}/protocol/openid-connect/token`;
+  }
+  private logoutEndpoint() {
+    return `${this.issuerUrl()}/protocol/openid-connect/logout`;
+  }
+
+  private async kcToken(
+    body: Record<string, string>,
+  ): Promise<KeycloakTokenResponse> {
+    const form = new URLSearchParams({
+      client_id: process.env.KEYCLOAK_CLIENT_ID || 'backend-api',
+      client_secret: process.env.KEYCLOAK_CLIENT_SECRET || '',
+      ...body,
+    });
+    const res = await axios.post(this.tokenEndpoint(), form, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 8000,
+      validateStatus: () => true,
+    });
+    if (res.status < 200 || res.status >= 300) {
+      this.logger.warn(
+        `Keycloak token error ${res.status}: ${JSON.stringify(res.data)}`,
+      );
+      throw new UnauthorizedException('Keycloak token error');
+    }
+    return res.data as KeycloakTokenResponse;
+  }
+
+  async loginWithPassword(usernameOrEmail: string, password: string) {
+    const tok = await this.kcToken({
+      grant_type: 'password',
+      username: usernameOrEmail,
+      password,
+      scope: 'openid',
+    });
+    const user = this.decodeUser(tok.access_token);
+    return { tok, user };
+  }
+
+  async refreshWithToken(refreshToken: string) {
+    const tok = await this.kcToken({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    });
+    const user = this.decodeUser(tok.access_token);
+    return { tok, user };
+  }
+
+  async logoutWithRefresh(refreshToken: string) {
+    const form = new URLSearchParams({
+      client_id: process.env.KEYCLOAK_CLIENT_ID || 'backend-api',
+      client_secret: process.env.KEYCLOAK_CLIENT_SECRET || '',
+      refresh_token: refreshToken,
+    });
+    const res = await axios.post(this.logoutEndpoint(), form, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 8000,
+      validateStatus: () => true,
+    });
+    // idempotente: no error si ya estaba invalidado
+    return { ok: res.status >= 200 && res.status < 300, status: res.status };
+  }
+
+  decodeUser(accessToken: string): UserFromToken {
+    const p: any = jose.decodeJwt(accessToken);
+    const roles: string[] = Array.isArray(p?.realm_access?.roles)
+      ? p.realm_access.roles
+      : [];
+    return {
+      id: String(p.sub),
+      username:
+        (typeof p?.preferred_username === 'string' && p.preferred_username) ||
+        (typeof p?.username === 'string' && p.username) ||
+        undefined,
+      email: typeof p?.email === 'string' ? p.email : undefined,
+      name:
+        (p?.name as string | undefined) ??
+        ([p?.given_name, p?.family_name].filter(Boolean).join(' ') ||
+          undefined),
+      roles,
+    };
   }
 }
