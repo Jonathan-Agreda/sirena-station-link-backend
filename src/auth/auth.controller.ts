@@ -16,10 +16,16 @@ import { RolesGuard } from './roles.guard';
 import { OidcService } from './oidc.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshMobileDto } from './dto/refresh-mobile.dto';
+import { SessionLimitService } from './session-limit.service';
+import { AuditService } from './audit.service';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly oidc: OidcService) {}
+  constructor(
+    private readonly oidc: OidcService,
+    private readonly sessionLimit: SessionLimitService,
+    private readonly audit: AuditService,
+  ) {}
 
   // ==================== Helpers cookie refresh (Web) ====================
   private get cookieName() {
@@ -44,7 +50,6 @@ export class AuthController {
     const DOMAIN = process.env.REFRESH_COOKIE_DOMAIN || undefined;
     const PATH = process.env.REFRESH_COOKIE_PATH || '/api/auth/refresh';
 
-    // Nota: los navegadores requieren Secure cuando SameSite=None (solo advertimos)
     if (SAMESITE === 'none' && !SECURE) {
       // eslint-disable-next-line no-console
       console.warn(
@@ -58,7 +63,6 @@ export class AuthController {
       sameSite: SAMESITE,
       domain: DOMAIN,
       path: PATH,
-      // maxAge opcional: dejamos que Keycloak gobierne TTL del refresh
     });
   }
 
@@ -67,7 +71,7 @@ export class AuthController {
       (process.env.REFRESH_COOKIE_SECURE || 'false').toLowerCase() === 'true';
     const HTTPONLY =
       (process.env.REFRESH_COOKIE_HTTPONLY || 'true').toLowerCase() === 'true';
-    const SAMESITE = this.resolveSameSite(); // <-- minúsculas garantizadas
+    const SAMESITE = this.resolveSameSite();
     const DOMAIN = process.env.REFRESH_COOKIE_DOMAIN || undefined;
     const PATH = process.env.REFRESH_COOKIE_PATH || '/api/auth/refresh';
 
@@ -85,6 +89,7 @@ export class AuthController {
   @HttpCode(200)
   async loginWeb(
     @Body() dto: LoginDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const { tok, user } = await this.oidc.loginWithPassword(
@@ -93,7 +98,27 @@ export class AuthController {
     );
     if (!tok.refresh_token)
       throw new UnauthorizedException('No refresh_token from IdP');
+
+    // Cookie con refresh
     this.setRtCookie(res, tok.refresh_token);
+
+    // Auditoría (hook; persistiremos en 3.1-B Parte 2)
+    await this.audit.record({
+      action: 'login',
+      userId: user.id,
+      username: user.username,
+      sessionId: tok.session_state,
+      by: 'user',
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
+    // Límite de sesiones según rol: conserva la sesión recién creada
+    await this.sessionLimit.enforce(
+      { id: user.id, username: user.username, roles: user.roles || [] },
+      tok.session_state,
+    );
+
     return { accessToken: tok.access_token, user };
   }
 
@@ -105,8 +130,22 @@ export class AuthController {
   ) {
     const rt = (req.cookies || {})[this.cookieName];
     if (!rt) throw new UnauthorizedException('Missing refresh cookie');
-    const { tok } = await this.oidc.refreshWithToken(rt);
+
+    const { tok, user } = await this.oidc.refreshWithToken(rt);
+
     if (tok.refresh_token) this.setRtCookie(res, tok.refresh_token); // rotación si aplica
+
+    // Auditoría simple (opcional): no siempre registra refresh, pero lo dejamos por coherencia
+    await this.audit.record({
+      action: 'login', // cuenta como continuidad de sesión
+      userId: user.id,
+      username: user.username,
+      sessionId: tok.session_state,
+      by: 'system',
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
     return { accessToken: tok.access_token };
   }
 
@@ -119,10 +158,20 @@ export class AuthController {
     const rt = (req.cookies || {})[this.cookieName];
     if (rt) await this.oidc.logoutWithRefresh(rt);
     this.clearRtCookie(res);
+
+    await this.audit.record({
+      action: 'logout',
+      userId: '-', // no tenemos aquí el sub sin decodificar; lo registraremos bien en Parte 2.
+      sessionId: '-', // idem
+      by: 'user',
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
     return { message: 'Sesión cerrada (web)' };
   }
 
-  // ============================== API PROTEGIDA (tu base existente) ==============================
+  // ============================== API PROTEGIDA (base existente) ==============================
   @UseGuards(AuthGuard)
   @Get('me')
   me(@Req() req: any) {
@@ -145,11 +194,29 @@ export class AuthController {
   // ============================== MÓVIL ==============================
   @Post('login/mobile')
   @HttpCode(200)
-  async loginMobile(@Body() dto: LoginDto) {
+  async loginMobile(@Body() dto: LoginDto, @Req() req: Request) {
     const { tok, user } = await this.oidc.loginWithPassword(
       dto.usernameOrEmail,
       dto.password,
     );
+
+    // Auditoría
+    await this.audit.record({
+      action: 'login',
+      userId: user.id,
+      username: user.username,
+      sessionId: tok.session_state,
+      by: 'user',
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
+    // Límite de sesiones (mismo comportamiento que web)
+    await this.sessionLimit.enforce(
+      { id: user.id, username: user.username, roles: user.roles || [] },
+      tok.session_state,
+    );
+
     return {
       accessToken: tok.access_token,
       refreshToken: tok.refresh_token,
@@ -159,8 +226,19 @@ export class AuthController {
 
   @Post('refresh/mobile')
   @HttpCode(200)
-  async refreshMobile(@Body() dto: RefreshMobileDto) {
-    const { tok } = await this.oidc.refreshWithToken(dto.refreshToken);
+  async refreshMobile(@Body() dto: RefreshMobileDto, @Req() req: Request) {
+    const { tok, user } = await this.oidc.refreshWithToken(dto.refreshToken);
+
+    await this.audit.record({
+      action: 'login', // continuidad de sesión
+      userId: user.id,
+      username: user.username,
+      sessionId: tok.session_state,
+      by: 'system',
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
     return {
       accessToken: tok.access_token,
       refreshToken: tok.refresh_token,
@@ -169,8 +247,18 @@ export class AuthController {
 
   @Post('logout/mobile')
   @HttpCode(200)
-  async logoutMobile(@Body() dto: RefreshMobileDto) {
+  async logoutMobile(@Body() dto: RefreshMobileDto, @Req() req: Request) {
     await this.oidc.logoutWithRefresh(dto.refreshToken);
+
+    await this.audit.record({
+      action: 'logout',
+      userId: '-', // lo precisaremos en Parte 2 (persistencia)
+      sessionId: '-',
+      by: 'user',
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
     return { message: 'Sesión cerrada (móvil)' };
   }
 }

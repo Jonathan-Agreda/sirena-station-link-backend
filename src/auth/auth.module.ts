@@ -1,10 +1,23 @@
 import { Module } from '@nestjs/common';
-import { OidcService } from './oidc.service';
 import { AuthController } from './auth.controller';
+import { OidcService } from './oidc.service';
+import { KeycloakAdminService } from './keycloak-admin.service';
+import { SessionLimitService } from './session-limit.service';
+import { AuditService } from './audit.service';
 
 @Module({
-  providers: [OidcService],
   controllers: [AuthController],
-  exports: [OidcService],
+  providers: [
+    OidcService,
+    KeycloakAdminService,
+    SessionLimitService,
+    AuditService,
+  ],
+  exports: [
+    OidcService,
+    KeycloakAdminService,
+    SessionLimitService,
+    AuditService,
+  ],
 })
 export class AuthModule {}

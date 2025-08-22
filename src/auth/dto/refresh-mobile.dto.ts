@@ -1,7 +1,7 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsString, MinLength } from 'class-validator';
 
 export class RefreshMobileDto {
   @IsString()
-  @IsNotEmpty()
+  @MinLength(10)
   refreshToken!: string;
 }
