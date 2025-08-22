@@ -5,6 +5,7 @@ import { ConfigModule } from '@nestjs/config';
 import { validateEnv } from './config/env.validation';
 import { HealthController } from './health/health.controller';
 import { DataModule } from './data/data.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { DataModule } from './data/data.module';
       validate: validateEnv,
     }),
     DataModule,
+    AuthModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
