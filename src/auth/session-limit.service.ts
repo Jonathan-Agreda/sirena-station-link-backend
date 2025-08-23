@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { KeycloakAdminService } from './keycloak-admin.service';
 import { AuditService } from './audit.service';
+import { PrismaService } from '../data/prisma.service';
 
 export type MinimalUser = {
   id?: string; // sub (UUID de Keycloak)
   username?: string; // preferred_username
-  roles?: string[];
+  roles?: string[]; // roles del token
 };
 
 function isValidUUID(v?: string | null) {
@@ -24,18 +25,36 @@ export class SessionLimitService {
   constructor(
     private readonly kcAdmin: KeycloakAdminService,
     private readonly audit: AuditService,
+    private readonly prisma: PrismaService,
   ) {}
 
-  private maxSessionsFor(roles: string[] = []) {
+  /** Lee override de sesiones desde BD; si no hay, aplica política por rol. */
+  private async maxSessionsFor(
+    userId: string,
+    roles: string[] = [],
+  ): Promise<number> {
+    try {
+      const dbUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { sessionLimit: true },
+      });
+
+      if (dbUser?.sessionLimit !== null && dbUser?.sessionLimit !== undefined) {
+        return dbUser.sessionLimit;
+      }
+    } catch (e) {
+      this.logger.warn(
+        `No se pudo leer sessionLimit para userId=${userId}: ${e?.message ?? e}`,
+      );
+    }
+
     if (roles.includes('SUPERADMIN')) return 3;
-    return 1; // ADMIN / GUARDIA / RESIDENTE
+    return 1;
   }
 
+  /** Acepta UUID directo o resuelve por username/email vía Keycloak Admin. */
   private async resolveUserId(user: MinimalUser): Promise<string | null> {
-    // Aceptamos id SOLO si parece un UUID real
     if (isValidUUID(user.id)) return user.id!;
-
-    // Si el id viene "-", "undefined", etc., intentamos por username/email
     if (user.username) {
       const found = await this.kcAdmin.findUserId(user.username);
       if (found?.id) return found.id;
@@ -44,7 +63,8 @@ export class SessionLimitService {
   }
 
   /**
-   * Mantiene la sesión 'keepSessionId' y revoca las más antiguas hasta cumplir el límite.
+   * Mantiene la sesión `keepSessionId` (si se pasa) y revoca las más antiguas
+   * hasta cumplir el límite calculado para el usuario.
    */
   async enforce(user: MinimalUser, keepSessionId: string | undefined) {
     const userId = await this.resolveUserId(user);
@@ -63,33 +83,63 @@ export class SessionLimitService {
       return;
     }
 
-    const sessions = await this.kcAdmin.listUserSessions(userId);
-    if (!sessions.length) {
+    // 1) Listar sesiones actuales en KC
+    let sessions: Array<{ id: string; start?: number; lastAccess?: number }> =
+      [];
+    try {
+      sessions = await this.kcAdmin.listUserSessions(userId);
+    } catch (e: any) {
+      const msg = e?.response?.data
+        ? JSON.stringify(e.response.data)
+        : (e?.message ?? String(e));
+      this.logger.warn(
+        `[Keycloak] listUserSessions falló para userId=${userId}: ${msg}`,
+      );
+      return; // no revocamos nada si no podemos listar
+    }
+
+    if (!sessions?.length) {
       this.logger.debug(`Sin sesiones activas para userId=${userId}`);
       return;
     }
 
+    // 2) Ordenar por actividad (más recientes primero)
     sessions.sort((a, b) => {
       const la = a.lastAccess ?? a.start ?? 0;
       const lb = b.lastAccess ?? b.start ?? 0;
-      return la - lb;
+      return lb - la;
     });
 
-    const max = this.maxSessionsFor(user.roles ?? []);
+    // 3) Calcular límite
+    const max = await this.maxSessionsFor(userId, user.roles ?? []);
     const total = sessions.length;
     this.logger.debug(`userId=${userId} total=${total} max=${max}`);
 
     if (total <= max) return;
 
-    // Mantener la sesión nueva
-    const filtered = sessions.filter((s) => s.id !== keepSessionId);
+    // 4) Filtrar candidatos a eliminar (excluyendo la sesión actual)
+    const candidates = keepSessionId
+      ? sessions.filter((s) => s.id !== keepSessionId)
+      : sessions;
 
-    // Matar antiguas hasta cumplir el límite
+    // 5) Revocar los más antiguos hasta cumplir el límite
     let toKill = total - max;
-    for (const s of filtered) {
+    for (const s of candidates.reverse()) {
+      // reverse → empezamos por los más antiguos
       if (toKill <= 0) break;
-      const ok = await this.kcAdmin.killSession(s.id);
-      this.logger.debug(`killSession ${s.id} -> ${ok ? 'OK' : 'FAIL'}`);
+
+      let ok = false;
+      try {
+        ok = await this.kcAdmin.deleteSession(s.id);
+      } catch (e: any) {
+        const msg = e?.response?.data
+          ? JSON.stringify(e.response.data)
+          : (e?.message ?? String(e));
+        this.logger.warn(`[Keycloak] deleteSession ${s.id} falló: ${msg}`);
+      }
+
+      this.logger.debug(`deleteSession ${s.id} -> ${ok ? 'OK' : 'FAIL'}`);
+
       await this.audit.record({
         action: 'revocation',
         userId,
@@ -98,6 +148,7 @@ export class SessionLimitService {
         reason: `exceeds-limit(${max})`,
         by: 'system',
       });
+
       if (ok) toKill--;
     }
   }

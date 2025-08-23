@@ -73,7 +73,7 @@ export class OidcService {
   async verifyAccessToken(token: string) {
     const discovery = await this.getDiscovery();
     const jwks = await this.getJWKS();
-    const expectedAud = process.env.KEYCLOAK_EXPECTED_AUD;
+    const expectedAud = process.env.KEYCLOAK_EXPECTED_ID;
 
     const result = await jose.jwtVerify(token, jwks, {
       issuer: discovery.issuer,

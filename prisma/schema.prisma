@@ -33,11 +33,20 @@ enum ActivationResult {
   FAILED
 }
 
+/**
+ * Acciones para auditoría de autenticación/sesiones
+ */
+enum AuditAction {
+  login
+  logout
+  revocation
+}
+
 // ---------- Models ----------
 model Urbanization {
-  id         String  @id @default(uuid())
-  name       String  @unique
-  maxUsers   Int?    // Solo SUPERADMIN podrá cambiar esto (lógica en servicio)
+  id         String   @id @default(uuid())
+  name       String   @unique
+  maxUsers   Int?     // Solo SUPERADMIN podrá cambiar esto (lógica en servicio)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -53,6 +62,11 @@ model User {
   username       String?  @unique
   role           Role
 
+  /// Override de sesiones concurrentes permitidas.
+  /// Si es NULL, el backend aplica la política por rol:
+  /// SUPERADMIN=3, ADMIN/GUARDIA/RESIDENTE=1
+  sessionLimit   Int?
+
   // Dirección del residente (a nivel de usuario)
   etapa          String?
   manzana        String?
@@ -67,17 +81,18 @@ model User {
   sessions       UserSession[]
   assignments    Assignment[]
   activationLogs ActivationLog[]
+  auditLogs      AuditLog[]       // relación inversa opcional
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }
 
 model Siren {
-  id             String   @id @default(uuid())
-  deviceId       String   @unique // = MQTT ClientID
-  apiKey         String            // = MQTT password (NO exponer en tópicos)
+  id             String      @id @default(uuid())
+  deviceId       String      @unique // = MQTT ClientID
+  apiKey         String               // = MQTT password (NO exponer en tópicos)
   ip             String?
-  online         Boolean  @default(false)
+  online         Boolean     @default(false)
   relay          SwitchState @default(OFF) // Regla MVP: relay=ON => siren=ON
   sirenState     SwitchState @default(OFF)
   lastSeen       DateTime?
@@ -170,4 +185,26 @@ model UserSession {
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, active])
+}
+
+/**
+ * Auditoría de Login / Logout / Revocaciones de sesión.
+ * Guarda también metadatos de origen para trazabilidad.
+ */
+model AuditLog {
+  id         String      @id @default(uuid())
+  action     AuditAction
+  userId     String?
+  username   String?
+  sessionId  String?
+  by         String?     // 'user' | 'system' | 'admin' (texto libre)
+  ip         String?
+  userAgent  String?
+  reason     String?
+  createdAt  DateTime    @default(now())
+
+  user       User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
 }

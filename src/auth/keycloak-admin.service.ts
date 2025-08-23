@@ -1,9 +1,9 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { URLSearchParams } from 'url';
 
 type KCUser = { id: string; username: string; email?: string };
-type KCUserSession = {
+export type KCUserSession = {
   id: string;
   username?: string;
   userId: string;
@@ -13,9 +13,19 @@ type KCUserSession = {
   clients?: Record<string, string>;
 };
 
+type TokenResponse = {
+  access_token: string;
+  expires_in: number;
+  token_type: string;
+  scope?: string;
+};
+
 @Injectable()
 export class KeycloakAdminService {
   private readonly logger = new Logger(KeycloakAdminService.name);
+  private http!: AxiosInstance;
+
+  private adminToken?: { value: string; expiresAt: number };
 
   private realm() {
     return process.env.KEYCLOAK_REALM || 'alarma';
@@ -23,79 +33,94 @@ export class KeycloakAdminService {
   private base() {
     const url = process.env.KEYCLOAK_BASE_URL;
     if (!url) throw new Error('KEYCLOAK_BASE_URL is required');
-    return url;
+    return url.replace(/\/+$/, '');
   }
   private adminBase() {
     return `${this.base()}/admin/realms/${this.realm()}`;
   }
+  private tokenUrl() {
+    return `${this.base()}/realms/${this.realm()}/protocol/openid-connect/token`;
+  }
+  private adminClientId() {
+    return process.env.KEYCLOAK_CLIENT_ID || 'backend-api';
+  }
+  private adminClientSecret() {
+    // AÑADE ESTA LÍNEA PARA DEPURAR
+    this.logger.debug(
+      `Using Client Secret: '${process.env.KEYCLOAK_CLIENT_SECRET}'`,
+    );
+    return process.env.KEYCLOAK_CLIENT_SECRET || '';
+  }
 
-  private async getAdminToken(): Promise<string> {
-    const tokenUrl = `${this.base()}/realms/${this.realm()}/protocol/openid-connect/token`;
-    const client_id = process.env.KEYCLOAK_CLIENT_ID || 'backend-api';
-    const client_secret = process.env.KEYCLOAK_CLIENT_SECRET || '';
-    const form = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id,
-      client_secret,
-    });
-    const res = await axios.post(tokenUrl, form, {
+  private isTokenValid() {
+    return this.adminToken && Date.now() < this.adminToken.expiresAt - 5_000;
+  }
+
+  private async fetchAdminToken(): Promise<string> {
+    const form = new URLSearchParams();
+    form.set('grant_type', 'client_credentials');
+    form.set('client_id', this.adminClientId());
+    form.set('client_secret', this.adminClientSecret());
+
+    const res = await axios.post<TokenResponse>(this.tokenUrl(), form, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       timeout: 8000,
       validateStatus: () => true,
     });
+
     if (res.status < 200 || res.status >= 300) {
       this.logger.error(
         `Admin token error ${res.status}: ${JSON.stringify(res.data)}`,
       );
       throw new UnauthorizedException('Keycloak admin token error');
     }
-    return res.data.access_token as string;
+
+    const expiresAt = Date.now() + res.data.expires_in * 1000;
+    this.adminToken = { value: res.data.access_token, expiresAt };
+    return res.data.access_token;
   }
 
-  /** Busca por username exacto; si no está, reintenta por email. */
-  async findUserId(usernameOrEmail: string): Promise<KCUser | null> {
-    const token = await this.getAdminToken();
+  private async getAdminToken(): Promise<string> {
+    if (this.isTokenValid()) return this.adminToken!.value;
+    return this.fetchAdminToken();
+  }
 
-    // 1) username exacto
-    const urlUser = `${this.adminBase()}/users?username=${encodeURIComponent(
-      usernameOrEmail,
-    )}&exact=true`;
-    let res = await axios.get(urlUser, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 8000,
-      validateStatus: () => true,
-    });
-    if (res.status !== 200) {
-      this.logger.warn(
-        `findUserId(username) ${res.status}: ${JSON.stringify(res.data)}`,
-      );
-    } else if (Array.isArray(res.data) && res.data.length > 0) {
+  private async client(): Promise<AxiosInstance> {
+    const token = await this.getAdminToken();
+    if (!this.http) {
+      this.http = axios.create({
+        baseURL: this.adminBase(),
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } else {
+      this.http.defaults.baseURL = this.adminBase();
+      this.http.defaults.headers.Authorization = `Bearer ${token}`;
+    }
+    return this.http;
+  }
+
+  async findUserId(usernameOrEmail: string): Promise<KCUser | null> {
+    const http = await this.client();
+
+    const urlUser = `/users?username=${encodeURIComponent(usernameOrEmail)}&exact=true`;
+    let res = await http.get(urlUser, { validateStatus: () => true });
+    if (res.status === 200 && Array.isArray(res.data) && res.data.length > 0) {
       return res.data[0] as KCUser;
     }
 
-    // 2) email
-    const urlEmail = `${this.adminBase()}/users?email=${encodeURIComponent(usernameOrEmail)}&exact=true`;
-    res = await axios.get(urlEmail, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 8000,
-      validateStatus: () => true,
-    });
-    if (res.status !== 200) {
-      this.logger.warn(
-        `findUserId(email) ${res.status}: ${JSON.stringify(res.data)}`,
-      );
-      return null;
+    const urlEmail = `/users?email=${encodeURIComponent(usernameOrEmail)}&exact=true`;
+    res = await http.get(urlEmail, { validateStatus: () => true });
+    if (res.status === 200 && Array.isArray(res.data) && res.data.length > 0) {
+      return res.data[0] as KCUser;
     }
-    const arr = res.data as KCUser[];
-    return Array.isArray(arr) && arr.length > 0 ? arr[0] : null;
+
+    this.logger.warn(`findUserId ${res.status}: ${JSON.stringify(res.data)}`);
+    return null;
   }
 
   async listUserSessions(userId: string): Promise<KCUserSession[]> {
-    const token = await this.getAdminToken();
-    const url = `${this.adminBase()}/users/${userId}/sessions`;
-    const res = await axios.get(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 8000,
+    const http = await this.client();
+    const res = await http.get(`/users/${userId}/sessions`, {
       validateStatus: () => true,
     });
     if (res.status !== 200) {
@@ -107,28 +132,33 @@ export class KeycloakAdminService {
     return res.data as KCUserSession[];
   }
 
-  async killSession(sessionId: string): Promise<boolean> {
-    const token = await this.getAdminToken();
-    const url = `${this.adminBase()}/sessions/${sessionId}`;
-    const res = await axios.delete(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 8000,
+  async deleteSession(sessionId: string): Promise<boolean> {
+    const http = await this.client();
+    const res = await http.delete(`/sessions/${sessionId}`, {
       validateStatus: () => true,
     });
     if (!(res.status >= 200 && res.status < 300)) {
       this.logger.warn(
-        `killSession ${res.status}: ${JSON.stringify(res.data)}`,
+        `deleteSession ${res.status}: ${JSON.stringify(res.data)}`,
       );
     }
     return res.status >= 200 && res.status < 300;
   }
 
   async logoutUserAll(userId: string): Promise<boolean> {
-    const token = await this.getAdminToken();
-    const url = `${this.adminBase()}/users/${userId}/logout`;
-    const res = await axios.post(url, null, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 8000,
+    const http = await this.client();
+    const res = await http.post(`/users/${userId}/logout`, null, {
+      validateStatus: () => true,
+    });
+    return res.status >= 200 && res.status < 300;
+  }
+
+  async revokeConsentForClient(
+    userId: string,
+    clientId: string,
+  ): Promise<boolean> {
+    const http = await this.client();
+    const res = await http.delete(`/users/${userId}/consents/${clientId}`, {
       validateStatus: () => true,
     });
     return res.status >= 200 && res.status < 300;
