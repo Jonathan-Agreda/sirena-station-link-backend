@@ -7,6 +7,7 @@ import { HealthController } from './health/health.controller';
 import { DataModule } from './data/data.module';
 import { AuthModule } from './auth/auth.module';
 import { MqttModule } from './mqtt/mqtt.module';
+import { DevicesModule } from './devices/devices.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { MqttModule } from './mqtt/mqtt.module';
     DataModule,
     AuthModule,
     MqttModule,
+    DevicesModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
