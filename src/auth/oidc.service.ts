@@ -22,7 +22,8 @@ export type KeycloakTokenResponse = {
 };
 
 export type UserFromToken = {
-  id: string;
+  /** sub (UUID) — puede venir undefined si el token no lo trae o hubo error de decode */
+  id?: string;
   username?: string;
   email?: string;
   name?: string;
@@ -33,11 +34,9 @@ export type UserFromToken = {
 export class OidcService {
   private readonly logger = new Logger(OidcService.name);
   private discovery?: OIDCConfig;
-  // jose v5/6: tipa el JWKS con ReturnType de createRemoteJWKSet
   private jwks?: ReturnType<typeof jose.createRemoteJWKSet>;
 
-  // ========= DISCOVERY / JWKS / VERIFY (tu lógica existente, preservada) =========
-
+  // ---------- Discovery / JWKS ----------
   private issuerUrl() {
     const base = process.env.KEYCLOAK_BASE_URL!;
     const realm = process.env.KEYCLOAK_REALM || 'alarma';
@@ -85,8 +84,7 @@ export class OidcService {
     return { payload: result.payload, protectedHeader: result.protectedHeader };
   }
 
-  // ========================== TOKEN ENDPOINTS (nuevo) ==========================
-
+  // ---------- Token endpoints ----------
   private tokenEndpoint() {
     return `${this.issuerUrl()}/protocol/openid-connect/token`;
   }
@@ -147,27 +145,42 @@ export class OidcService {
       timeout: 8000,
       validateStatus: () => true,
     });
-    // idempotente: no error si ya estaba invalidado
+    // idempotente
     return { ok: res.status >= 200 && res.status < 300, status: res.status };
   }
 
+  // ---------- Helpers de claims / usuario ----------
+  /**
+   * Extrae claims sin verificar (útil para logging o derivar username rápidamente).
+   * Para seguridad usa siempre verifyAccessToken en los guards.
+   */
+  extractClaims<T = any>(accessToken: string): T {
+    return jose.decodeJwt(accessToken) as T;
+  }
+
   decodeUser(accessToken: string): UserFromToken {
-    const p: any = jose.decodeJwt(accessToken);
+    const p: any = this.extractClaims(accessToken);
+
     const roles: string[] = Array.isArray(p?.realm_access?.roles)
       ? p.realm_access.roles
       : [];
-    return {
-      id: String(p.sub),
-      username:
-        (typeof p?.preferred_username === 'string' && p.preferred_username) ||
-        (typeof p?.username === 'string' && p.username) ||
-        undefined,
-      email: typeof p?.email === 'string' ? p.email : undefined,
-      name:
-        (p?.name as string | undefined) ??
-        ([p?.given_name, p?.family_name].filter(Boolean).join(' ') ||
-          undefined),
-      roles,
-    };
+
+    // IMPORTANTE: id solo si sub es string. Nada de "String(p.sub)".
+    const id =
+      typeof p?.sub === 'string' && p.sub.length > 0 ? p.sub : undefined;
+
+    const username =
+      (typeof p?.preferred_username === 'string' && p.preferred_username) ||
+      (typeof p?.username === 'string' && p.username) ||
+      undefined;
+
+    const email = typeof p?.email === 'string' ? p.email : undefined;
+
+    const name =
+      (typeof p?.name === 'string' && p.name) ||
+      [p?.given_name, p?.family_name].filter(Boolean).join(' ') ||
+      undefined;
+
+    return { id, username, email, name, roles };
   }
 }

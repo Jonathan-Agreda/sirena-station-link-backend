@@ -8,8 +8,8 @@ type KCUserSession = {
   username?: string;
   userId: string;
   ipAddress?: string;
-  start?: number; // epoch ms
-  lastAccess?: number; // epoch ms
+  start?: number;
+  lastAccess?: number;
   clients?: Record<string, string>;
 };
 
@@ -52,25 +52,42 @@ export class KeycloakAdminService {
     return res.data.access_token as string;
   }
 
-  /** Busca usuario por username exacto y devuelve su UUID (id). */
-  async findUserByUsername(username: string): Promise<KCUser | null> {
+  /** Busca por username exacto; si no está, reintenta por email. */
+  async findUserId(usernameOrEmail: string): Promise<KCUser | null> {
     const token = await this.getAdminToken();
-    const url = `${this.adminBase()}/users?username=${encodeURIComponent(username)}`;
-    const res = await axios.get(url, {
+
+    // 1) username exacto
+    const urlUser = `${this.adminBase()}/users?username=${encodeURIComponent(
+      usernameOrEmail,
+    )}&exact=true`;
+    let res = await axios.get(urlUser, {
       headers: { Authorization: `Bearer ${token}` },
       timeout: 8000,
       validateStatus: () => true,
     });
     if (res.status !== 200) {
       this.logger.warn(
-        `findUserByUsername ${res.status}: ${JSON.stringify(res.data)}`,
+        `findUserId(username) ${res.status}: ${JSON.stringify(res.data)}`,
+      );
+    } else if (Array.isArray(res.data) && res.data.length > 0) {
+      return res.data[0] as KCUser;
+    }
+
+    // 2) email
+    const urlEmail = `${this.adminBase()}/users?email=${encodeURIComponent(usernameOrEmail)}&exact=true`;
+    res = await axios.get(urlEmail, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 8000,
+      validateStatus: () => true,
+    });
+    if (res.status !== 200) {
+      this.logger.warn(
+        `findUserId(email) ${res.status}: ${JSON.stringify(res.data)}`,
       );
       return null;
     }
     const arr = res.data as KCUser[];
-    if (!Array.isArray(arr) || arr.length === 0) return null;
-    // Keycloak devuelve coincidencia exacta en [0] si existe
-    return arr[0];
+    return Array.isArray(arr) && arr.length > 0 ? arr[0] : null;
   }
 
   async listUserSessions(userId: string): Promise<KCUserSession[]> {
