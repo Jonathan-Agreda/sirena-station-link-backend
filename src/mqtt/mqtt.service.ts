@@ -1,4 +1,3 @@
-// src/mqtt/mqtt.service.ts
 import {
   Injectable,
   Logger,
@@ -27,6 +26,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   // Memoria: último estado por deviceId
   private lastStates = new Map<string, LastState>();
 
+  // Timers auto-OFF
+  private autoOffTimers = new Map<string, NodeJS.Timeout>();
+
   constructor(private readonly config: ConfigService) {}
 
   onModuleInit() {
@@ -34,6 +36,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy() {
+    this.clearAllAutoOff();
     if (this.client) {
       this.client.end(true);
       this.client.removeAllListeners();
@@ -44,7 +47,6 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   /** Conectar a EMQX */
   private connect() {
     const host = this.config.get<string>('EMQX_HOST', 'localhost');
-    // Limpieza: parseo seguro del puerto
     const port = Number(this.config.get<string>('EMQX_PORT', '1883'));
     const username = this.config.get<string>('EMQX_USERNAME');
     const password = this.config.get<string>('EMQX_PASSWORD');
@@ -56,7 +58,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       password,
       keepalive: 30,
       reconnectPeriod: 2000,
-      clean: true, // suficiente para recibir retained al suscribirse
+      clean: true,
     };
 
     const url = `mqtt://${host}:${port}`;
@@ -94,7 +96,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       ['status/+/state', { qos: 1 }],
       ['status/+/lwt', { qos: 1 }],
       ['tele/+/heartbeat', { qos: 1 }],
-      ['cmd/+/ack', { qos: 1 }], // opcional
+      ['cmd/+/ack', { qos: 1 }],
     ];
 
     for (const [topic, opts] of subs) {
@@ -120,7 +122,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   /** Manejar mensajes entrantes */
   private handleMessage(topic: string, buf: Buffer) {
     const msg = buf.toString('utf8').trim();
-    const [root, deviceId, sub] = topic.split('/'); // p.ej. status/SRN-001/state
+    const [root, deviceId, sub] = topic.split('/');
 
     try {
       if (root === 'status' && sub === 'state') {
@@ -133,7 +135,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         const nowIso = new Date().toISOString();
         const state: LastState = {
           deviceId: id,
-          online: data.online ?? true, // por state asumimos online
+          online: data.online ?? true,
           relay: data.relay,
           siren: data.siren,
           ip: data.ip,
@@ -151,7 +153,6 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (root === 'status' && sub === 'lwt') {
-        // LWT suele llegar como "offline"
         const id = deviceId;
         const prev = this.lastStates.get(id);
         const nowIso = new Date().toISOString();
@@ -174,7 +175,6 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         const prev = this.lastStates.get(id);
         const nowIso = hb.ts || new Date().toISOString();
 
-        // Solo marcamos lastHeartbeatAt y, opcionalmente, online=true si así lo deseas
         this.lastStates.set(id, {
           deviceId: id,
           online: prev?.online ?? true,
@@ -189,7 +189,6 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (root === 'cmd' && sub === 'ack') {
-        // Opcional: parsear ACKs de comandos aquí
         this.logger.debug(`[ack] ${deviceId} → ${msg}`);
       }
     } catch (e: any) {
@@ -201,8 +200,14 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   async publishCommand(deviceId: string, payload: CommandPayload) {
     if (!this.client || !this.isConnected())
       throw new Error('MQTT not connected');
+
+    // TTL fallback desde .env
+    const defaultTtl = this.config.get<number>('DEFAULT_CMD_TTL_MS') ?? 300_000;
+    payload.ttlMs = payload.ttlMs ?? defaultTtl;
+
     const topic = `cmd/${deviceId}/set`;
     const options: IClientPublishOptions = { qos: 1, retain: false };
+
     this.client.publish(topic, JSON.stringify(payload), options, (err) => {
       if (err) this.logger.error(`Publish error to ${topic}: ${err.message}`);
       else
@@ -210,6 +215,47 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           `[cmd->set] ${deviceId} action=${payload.action} ttlMs=${payload.ttlMs}`,
         );
     });
+
+    // Auto-OFF si action=ON
+    if (payload.action === 'ON') {
+      this.scheduleAutoOff(deviceId, payload.ttlMs);
+    } else if (payload.action === 'OFF') {
+      this.clearAutoOff(deviceId);
+    }
+  }
+
+  /** Auto-OFF manager */
+  private scheduleAutoOff(deviceId: string, ms: number) {
+    this.clearAutoOff(deviceId); // limpiar anterior
+    const timer = setTimeout(() => {
+      this.logger.log(`[auto-off] Ejecutando OFF automático para ${deviceId}`);
+      this.publishCommand(deviceId, {
+        commandId: `autooff_${Date.now()}`,
+        action: 'OFF',
+        ttlMs: 0,
+        requestedBy: 'system:auto-off',
+        cause: 'auto',
+      } as CommandPayload);
+    }, ms);
+
+    this.autoOffTimers.set(deviceId, timer);
+    this.logger.log(`[auto-off] Programado OFF en ${ms}ms para ${deviceId}`);
+  }
+
+  private clearAutoOff(deviceId: string) {
+    const t = this.autoOffTimers.get(deviceId);
+    if (t) {
+      clearTimeout(t);
+      this.autoOffTimers.delete(deviceId);
+      this.logger.debug(`[auto-off] Cancelado para ${deviceId}`);
+    }
+  }
+
+  private clearAllAutoOff() {
+    for (const t of this.autoOffTimers.values()) {
+      clearTimeout(t);
+    }
+    this.autoOffTimers.clear();
   }
 
   /** Helpers */
