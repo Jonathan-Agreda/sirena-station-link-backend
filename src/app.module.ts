@@ -6,6 +6,7 @@ import { validateEnv } from './config/env.validation';
 import { HealthController } from './health/health.controller';
 import { DataModule } from './data/data.module';
 import { AuthModule } from './auth/auth.module';
+import { MqttModule } from './mqtt/mqtt.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { AuthModule } from './auth/auth.module';
     }),
     DataModule,
     AuthModule,
+    MqttModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
