@@ -17,19 +17,23 @@ import {
   HeartbeatPayload,
   LastState,
 } from './mqtt.types';
+import { ActivationLogService } from '../devices/activation-log.service';
+import { ActivationAction, ActivationResult } from '@prisma/client';
+import { DevicesService } from '../devices/devices.service';
 
 @Injectable()
 export class MqttService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MqttService.name);
   private client: MqttClient | null = null;
 
-  // Memoria: último estado por deviceId
   private lastStates = new Map<string, LastState>();
-
-  // Timers auto-OFF
   private autoOffTimers = new Map<string, NodeJS.Timeout>();
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly activationLog: ActivationLogService,
+    private readonly devicesService: DevicesService, // ✅ inyectamos DevicesService
+  ) {}
 
   onModuleInit() {
     this.connect();
@@ -50,7 +54,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     const port = Number(this.config.get<string>('EMQX_PORT', '1883'));
     const username = this.config.get<string>('EMQX_USERNAME');
     const password = this.config.get<string>('EMQX_PASSWORD');
-    const clientId = `backend-api_${process.pid}_${Math.random().toString(16).slice(2)}`;
+    const clientId = `backend-api_${process.pid}_${Math.random()
+      .toString(16)
+      .slice(2)}`;
 
     const opts: IClientOptions = {
       clientId,
@@ -196,12 +202,11 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Publicar comando a un dispositivo */
+  /** Publicar comando */
   async publishCommand(deviceId: string, payload: CommandPayload) {
     if (!this.client || !this.isConnected())
       throw new Error('MQTT not connected');
 
-    // TTL fallback desde .env
     const defaultTtl = this.config.get<number>('DEFAULT_CMD_TTL_MS') ?? 300_000;
     payload.ttlMs = payload.ttlMs ?? defaultTtl;
 
@@ -216,7 +221,6 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         );
     });
 
-    // Auto-OFF si action=ON
     if (payload.action === 'ON') {
       this.scheduleAutoOff(deviceId, payload.ttlMs);
     } else if (payload.action === 'OFF') {
@@ -224,18 +228,36 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Auto-OFF manager */
+  /** Auto-OFF */
   private scheduleAutoOff(deviceId: string, ms: number) {
-    this.clearAutoOff(deviceId); // limpiar anterior
-    const timer = setTimeout(() => {
+    this.clearAutoOff(deviceId);
+    const timer = setTimeout(async () => {
       this.logger.log(`[auto-off] Ejecutando OFF automático para ${deviceId}`);
-      this.publishCommand(deviceId, {
+
+      await this.publishCommand(deviceId, {
         commandId: `autooff_${Date.now()}`,
         action: 'OFF',
         ttlMs: 0,
         requestedBy: 'system:auto-off',
         cause: 'auto',
       } as CommandPayload);
+
+      // ✅ Buscar sirenId real en la BD
+      const siren = await this.devicesService.findByDeviceId(deviceId);
+      if (siren) {
+        await this.activationLog.record({
+          sirenId: siren.id, // 🔹 usamos UUID correcto
+          userId: null,
+          action: ActivationAction.OFF,
+          result: ActivationResult.ACCEPTED,
+          reason: 'AUTO_OFF',
+          ip: 'system',
+        });
+      } else {
+        this.logger.error(
+          `[auto-off] No se encontró siren para deviceId=${deviceId}`,
+        );
+      }
     }, ms);
 
     this.autoOffTimers.set(deviceId, timer);
@@ -252,9 +274,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   }
 
   private clearAllAutoOff() {
-    for (const t of this.autoOffTimers.values()) {
-      clearTimeout(t);
-    }
+    for (const t of this.autoOffTimers.values()) clearTimeout(t);
     this.autoOffTimers.clear();
   }
 

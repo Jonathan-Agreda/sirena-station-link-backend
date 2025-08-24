@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
@@ -18,8 +18,8 @@ import { DevicesModule } from './devices/devices.module';
     }),
     DataModule,
     AuthModule,
-    MqttModule,
-    DevicesModule,
+    forwardRef(() => MqttModule), // 🔹 se protege la referencia circular
+    forwardRef(() => DevicesModule),
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
