@@ -1,13 +1,12 @@
-// src/devices/activation-log.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../data/prisma.service';
 import { ActivationAction, ActivationResult } from '@prisma/client';
 
 export type ActivationEvent = {
-  sirenId: string; // UUID de la sirena (Siren.id)
-  userId?: string | null; // UUID de User en BD o null
-  action: ActivationAction; // ON | OFF | AUTO_OFF
-  result: ActivationResult; // ACCEPTED | REJECTED | FAILED
+  sirenId: string;
+  userId?: string | null;
+  action: ActivationAction;
+  result: ActivationResult;
   reason?: string;
   ip?: string;
 };
@@ -18,12 +17,11 @@ export class ActivationLogService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Registrar un log de activación
-   */
   async record(evt: ActivationEvent) {
     this.logger.log(
-      `[ACTIVATION] siren=${evt.sirenId} user=${evt.userId ?? '-'} action=${evt.action} result=${evt.result} reason=${evt.reason ?? '-'}`,
+      `[ACTIVATION] siren=${evt.sirenId} user=${evt.userId ?? '-'} action=${
+        evt.action
+      } result=${evt.result} reason=${evt.reason ?? '-'}`,
     );
 
     try {
@@ -45,9 +43,6 @@ export class ActivationLogService {
     }
   }
 
-  /**
-   * Obtener todos los logs (opcionalmente filtrados por userId)
-   */
   async findAll(filter?: { userId?: string }) {
     return this.prisma.activationLog.findMany({
       where: { userId: filter?.userId },
@@ -59,9 +54,6 @@ export class ActivationLogService {
     });
   }
 
-  /**
-   * Obtener logs de una urbanización
-   */
   async findByUrbanization(urbanizationId: string) {
     return this.prisma.activationLog.findMany({
       where: { siren: { urbanizationId } },
@@ -73,9 +65,17 @@ export class ActivationLogService {
     });
   }
 
-  /**
-   * Obtener logs de una sirena específica (por UUID)
-   */
+  async findByUrbanizationAndUser(urbanizationId: string, userId: string) {
+    return this.prisma.activationLog.findMany({
+      where: { userId, siren: { urbanizationId } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { id: true, username: true, email: true, role: true } },
+        siren: { select: { id: true, deviceId: true, urbanizationId: true } },
+      },
+    });
+  }
+
   async findBySiren(sirenId: string) {
     return this.prisma.activationLog.findMany({
       where: { sirenId },
@@ -87,12 +87,35 @@ export class ActivationLogService {
     });
   }
 
-  /**
-   * Obtener logs de una sirena específica filtrados por urbanización
-   */
+  async findBySirenAndUser(sirenId: string, userId: string) {
+    return this.prisma.activationLog.findMany({
+      where: { sirenId, userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { id: true, username: true, email: true, role: true } },
+        siren: { select: { id: true, deviceId: true, urbanizationId: true } },
+      },
+    });
+  }
+
   async findBySirenAndUrbanization(sirenId: string, urbanizationId: string) {
     return this.prisma.activationLog.findMany({
       where: { sirenId, siren: { urbanizationId } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { id: true, username: true, email: true, role: true } },
+        siren: { select: { id: true, deviceId: true, urbanizationId: true } },
+      },
+    });
+  }
+
+  async findBySirenAndUrbanizationAndUser(
+    sirenId: string,
+    urbanizationId: string,
+    userId: string,
+  ) {
+    return this.prisma.activationLog.findMany({
+      where: { sirenId, userId, siren: { urbanizationId } },
       orderBy: { createdAt: 'desc' },
       include: {
         user: { select: { id: true, username: true, email: true, role: true } },

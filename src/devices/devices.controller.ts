@@ -150,6 +150,14 @@ export class DevicesController {
           'El admin no tiene urbanización asociada en BD',
         );
       }
+
+      // ✅ aplicar filtro si viene userId
+      if (userId) {
+        return this.activationLog.findByUrbanizationAndUser(
+          dbUser.urbanizationId,
+          userId,
+        );
+      }
       return this.activationLog.findByUrbanization(dbUser.urbanizationId);
     }
 
@@ -161,6 +169,7 @@ export class DevicesController {
   async getLogsByDevice(
     @Param('deviceId') deviceId: string,
     @Req() req: Request,
+    @Query('userId') userId?: string,
   ) {
     const kcUser: any = (req as any).user;
     const roles: string[] = (kcUser.roles || []).map((r: string) =>
@@ -173,15 +182,25 @@ export class DevicesController {
     }
 
     if (roles.includes('SUPERADMIN')) {
+      if (userId) {
+        return this.activationLog.findBySirenAndUser(siren.id, userId);
+      }
       return this.activationLog.findBySiren(siren.id);
     }
 
     if (roles.includes('ADMIN')) {
-      // 🔹 siempre resolver desde DB
       const dbUser = await this.devicesService.findUserByKeycloakId(kcUser.sub);
       if (!dbUser?.urbanizationId) {
         throw new ForbiddenException(
           'El admin no tiene urbanización asociada en BD',
+        );
+      }
+
+      if (userId) {
+        return this.activationLog.findBySirenAndUrbanizationAndUser(
+          siren.id,
+          dbUser.urbanizationId,
+          userId,
         );
       }
       return this.activationLog.findBySirenAndUrbanization(
