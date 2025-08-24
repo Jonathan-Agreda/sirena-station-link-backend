@@ -143,12 +143,14 @@ export class DevicesController {
     }
 
     if (roles.includes('ADMIN')) {
-      if (!kcUser.urbanizationId) {
+      // 🔹 siempre resolver desde DB
+      const dbUser = await this.devicesService.findUserByKeycloakId(kcUser.sub);
+      if (!dbUser?.urbanizationId) {
         throw new ForbiddenException(
           'El admin no tiene urbanización asociada en BD',
         );
       }
-      return this.activationLog.findByUrbanization(kcUser.urbanizationId);
+      return this.activationLog.findByUrbanization(dbUser.urbanizationId);
     }
 
     throw new ForbiddenException('No autorizado para ver logs');
@@ -175,14 +177,16 @@ export class DevicesController {
     }
 
     if (roles.includes('ADMIN')) {
-      if (!kcUser.urbanizationId) {
+      // 🔹 siempre resolver desde DB
+      const dbUser = await this.devicesService.findUserByKeycloakId(kcUser.sub);
+      if (!dbUser?.urbanizationId) {
         throw new ForbiddenException(
           'El admin no tiene urbanización asociada en BD',
         );
       }
       return this.activationLog.findBySirenAndUrbanization(
         siren.id,
-        kcUser.urbanizationId,
+        dbUser.urbanizationId,
       );
     }
 
