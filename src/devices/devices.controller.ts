@@ -12,10 +12,12 @@ import { MqttService } from '../mqtt/mqtt.service';
 import { SendCommandDto } from './dto/send-command.dto';
 import { CommandPayload } from '../mqtt/mqtt.types';
 import { KeycloakGuard } from '../auth/keycloak.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 import type { Request } from 'express';
 
 @Controller('devices')
-@UseGuards(KeycloakGuard)
+@UseGuards(KeycloakGuard, RolesGuard) // ⬅️ Protegemos todo el controller
 export class DevicesController {
   constructor(
     private readonly mqtt: MqttService,
@@ -28,20 +30,21 @@ export class DevicesController {
 
   /**
    * Enviar un comando a un dispositivo
+   * Solo ADMIN puede enviar comandos
    * POST /api/devices/:deviceId/cmd
    */
   @Post(':deviceId/cmd')
+  @Roles('ADMIN') // ⬅️ Solo ADMIN puede ejecutar este endpoint
   async sendCommand(
     @Param('deviceId') deviceId: string,
     @Body() dto: SendCommandDto,
     @Req() req: Request,
   ) {
-    const defaultTtl = this.config.get<number>('DEFAULT_CMD_TTL_MS') ?? 300_000; // fallback 5min
-
+    const defaultTtl = this.config.get<number>('DEFAULT_CMD_TTL_MS') ?? 300_000;
     const effectiveTtl =
       dto.ttlMs === undefined || dto.ttlMs === 0 ? defaultTtl : dto.ttlMs;
 
-    const kcUser: any = (req as any).user; // viene del KeycloakGuard
+    const kcUser: any = (req as any).user;
     const userEmail =
       kcUser?.email || kcUser?.preferred_username || kcUser?.sub || 'anonymous';
 
@@ -59,6 +62,7 @@ export class DevicesController {
 
   /**
    * Endpoint de prueba
+   * Cualquier usuario autenticado (con token válido) puede acceder
    * GET /api/devices/ping
    */
   @Get('ping')

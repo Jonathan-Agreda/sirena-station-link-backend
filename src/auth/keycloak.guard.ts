@@ -42,6 +42,7 @@ export class KeycloakGuard implements CanActivate {
     const token = auth.substring(7);
 
     try {
+      // Decodificar encabezado para obtener el kid
       const decodedHeader = jwt.decode(token, { complete: true });
       if (!decodedHeader || typeof decodedHeader === 'string') {
         throw new UnauthorizedException('Token inválido');
@@ -51,16 +52,31 @@ export class KeycloakGuard implements CanActivate {
       const key = await this.client.getSigningKey(kid);
       const signingKey = key.getPublicKey();
 
+      // Verificar token contra Keycloak
       const verified = jwt.verify(token, signingKey, {
         algorithms: ['RS256'],
         audience: this.config.get<string>('KEYCLOAK_CLIENT_ID'),
         issuer: `${this.config.get<string>(
           'KEYCLOAK_BASE_URL',
         )}/realms/${this.config.get<string>('KEYCLOAK_REALM')}`,
-      });
+      }) as any;
 
-      (req as any).user = verified;
-      this.logger.debug(`Token válido para sub=${(verified as any).sub}`);
+      // 🔹 Extraer roles de Keycloak
+      const realmRoles: string[] = verified?.realm_access?.roles || [];
+      const clientId = this.config.get<string>('KEYCLOAK_CLIENT_ID') || '';
+      const clientRoles: string[] =
+        (verified?.resource_access?.[clientId] as { roles?: string[] })
+          ?.roles || [];
+
+      // Guardar user en request con roles listos para RolesGuard
+      (req as any).user = {
+        ...verified,
+        roles: [...realmRoles, ...clientRoles],
+      };
+
+      this.logger.debug(
+        `Token válido para sub=${verified.sub}, roles=[${(req as any).user.roles.join(', ')}]`,
+      );
       return true;
     } catch (err: any) {
       this.logger.error(`Error validando token: ${err.message}`);
