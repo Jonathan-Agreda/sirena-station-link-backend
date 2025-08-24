@@ -3,11 +3,13 @@ import { DevicesController } from './devices.controller';
 import { DevicesService } from './devices.service';
 import { MqttModule } from '../mqtt/mqtt.module';
 import { DataModule } from '../data/data.module';
+import { ActivationLogService } from './activation-log.service';
+import { DeviceCmdExceptionFilter } from './devices.exception-filter';
 
 @Module({
   imports: [MqttModule, DataModule],
   controllers: [DevicesController],
-  providers: [DevicesService],
-  exports: [DevicesService],
+  providers: [DevicesService, ActivationLogService, DeviceCmdExceptionFilter],
+  exports: [DevicesService, ActivationLogService],
 })
 export class DevicesModule {}

@@ -1,4 +1,3 @@
-// src/devices/devices.service.ts
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../data/prisma.service';
 
@@ -9,6 +8,23 @@ export class DevicesService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
+   * Buscar sirena por deviceId (devuelve null si no existe)
+   */
+  async findByDeviceId(deviceId: string) {
+    return this.prisma.siren.findUnique({
+      where: { deviceId },
+      include: { residents: true },
+    });
+  }
+
+  /**
+   * Buscar usuario por KeycloakId
+   */
+  async findUserByKeycloakId(sub: string) {
+    return this.prisma.user.findUnique({ where: { keycloakId: sub } });
+  }
+
+  /**
    * Valida si el usuario tiene permiso para controlar una sirena
    * según su rol y pertenencia.
    */
@@ -17,37 +33,29 @@ export class DevicesService {
       r.toUpperCase(),
     );
 
-    // SUPERADMIN → acceso total
+    // 🔹 Siempre buscamos el usuario en BD para asignar dbId
+    const dbUser = await this.findUserByKeycloakId(user.sub);
+    if (!dbUser) {
+      throw new ForbiddenException('Usuario no registrado en BD');
+    }
+    user.dbId = dbUser.id;
+    user.urbanizationId = dbUser.urbanizationId;
+
+    // SUPERADMIN → acceso total (pero ya con dbId seteado)
     if (roles.includes('SUPERADMIN')) {
-      this.logger.debug(`[validateAccess] SUPERADMIN acceso total`);
+      this.logger.debug(
+        `[validateAccess] SUPERADMIN ${dbUser.id} acceso total`,
+      );
       return;
     }
 
     // Buscar sirena
-    const siren = await this.prisma.siren.findUnique({
-      where: { deviceId },
-      include: {
-        residents: true, // assignments
-      },
-    });
-
+    const siren = await this.findByDeviceId(deviceId);
     if (!siren) {
       throw new ForbiddenException(`Siren ${deviceId} no existe`);
     }
 
-    // Buscar usuario en BD
-    const dbUser = await this.prisma.user.findUnique({
-      where: { keycloakId: user.sub },
-    });
-    if (!dbUser) {
-      throw new ForbiddenException('Usuario no registrado en BD');
-    }
-
-    // 🔹 enriquecer user para siguientes requests (útil en controllers)
-    user.dbId = dbUser.id;
-    user.urbanizationId = dbUser.urbanizationId;
-
-    // ADMIN o GUARDIA → acceso solo si coincide urbanización
+    // ADMIN o GUARDIA → misma urbanización
     if (roles.includes('ADMIN') || roles.includes('GUARDIA')) {
       if (
         dbUser.urbanizationId &&
@@ -63,7 +71,7 @@ export class DevicesService {
       );
     }
 
-    // RESIDENTE → acceso solo si tiene asignada la sirena
+    // RESIDENTE → debe tener asignada la sirena
     if (roles.includes('RESIDENTE')) {
       const assigned = await this.prisma.assignment.findFirst({
         where: { userId: dbUser.id, sirenId: siren.id, active: true },
@@ -79,7 +87,6 @@ export class DevicesService {
       );
     }
 
-    // Si no coincide ningún rol → acceso denegado
     throw new ForbiddenException('Rol no autorizado para enviar comandos');
   }
 }
