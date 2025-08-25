@@ -75,6 +75,7 @@ export class DevicesController {
         cause: dto.cause ?? 'manual',
       };
 
+      // 👉 Publicar al broker
       await this.mqtt.publishCommand(deviceId, payload);
 
       const siren = await this.devicesService.findByDeviceId(deviceId);
@@ -82,13 +83,13 @@ export class DevicesController {
         throw new NotFoundException(`Sirena ${deviceId} no encontrada`);
       }
 
-      // ✅ Log de éxito
+      // 📝 Log ACCEPTED (el ACK real se guardará en mqtt.service como EXECUTED)
       await this.activationLog.record({
         sirenId: siren.id,
         userId: kcUser.dbId ?? kcUser.sub,
         action: dto.action as ActivationAction,
         result: ActivationResult.ACCEPTED,
-        reason: 'OK',
+        reason: 'Command published to broker',
         ip: req.ip,
       });
 
@@ -143,7 +144,6 @@ export class DevicesController {
     }
 
     if (roles.includes('ADMIN')) {
-      // 🔹 siempre resolver desde DB
       const dbUser = await this.devicesService.findUserByKeycloakId(kcUser.sub);
       if (!dbUser?.urbanizationId) {
         throw new ForbiddenException(
@@ -151,7 +151,6 @@ export class DevicesController {
         );
       }
 
-      // ✅ aplicar filtro si viene userId
       if (userId) {
         return this.activationLog.findByUrbanizationAndUser(
           dbUser.urbanizationId,

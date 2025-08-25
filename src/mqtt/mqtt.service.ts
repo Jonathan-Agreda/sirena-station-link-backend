@@ -34,7 +34,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly activationLog: ActivationLogService,
     private readonly devicesService: DevicesService,
-    private readonly ws: WsGateway, // ✅ inyectamos WsGateway
+    private readonly ws: WsGateway,
   ) {}
 
   onModuleInit() {
@@ -128,7 +128,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Manejar mensajes entrantes */
-  private handleMessage(topic: string, buf: Buffer) {
+  private async handleMessage(topic: string, buf: Buffer) {
     const msg = buf.toString('utf8').trim();
     const [root, deviceId, sub] = topic.split('/');
 
@@ -160,7 +160,6 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           `[state] ${id} → online=${state.online} relay=${state.relay} siren=${state.siren}`,
         );
 
-        // 🔔 Emitir al frontend
         this.ws.emitEvent('device.state', state);
       }
 
@@ -180,7 +179,6 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         this.lastStates.set(id, offline);
         this.logger.warn(`[lwt] ${id} → offline`);
 
-        // 🔔 Emitir al frontend
         this.ws.emitEvent('device.lwt', offline);
       }
 
@@ -203,15 +201,43 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         this.lastStates.set(id, updated);
         this.logger.debug(`[heartbeat] ${id} @ ${nowIso}`);
 
-        // 🔔 Emitir al frontend
         this.ws.emitEvent('device.heartbeat', updated);
       }
 
       if (root === 'cmd' && sub === 'ack') {
         this.logger.debug(`[ack] ${deviceId} → ${msg}`);
 
-        // 🔔 Emitir al frontend
-        this.ws.emitEvent('device.ack', { deviceId, raw: msg });
+        const ack = this.safeJson<any>(msg);
+        if (!ack) {
+          this.logger.error(`[ack] No se pudo parsear ACK: ${msg}`);
+          return;
+        }
+
+        this.ws.emitEvent('device.ack', {
+          deviceId,
+          commandId: ack.commandId,
+          result: ack.result,
+          ts: ack.ts ?? new Date().toISOString(),
+        });
+
+        // 📝 Guardar log EXECUTED
+        const siren = await this.devicesService.findByDeviceId(deviceId);
+        if (siren) {
+          await this.activationLog.record({
+            sirenId: siren.id,
+            userId: null,
+            action:
+              ack.action === 'OFF' ? ActivationAction.OFF : ActivationAction.ON,
+            result:
+              ack.result === 'OK'
+                ? ActivationResult.EXECUTED
+                : ActivationResult.FAILED,
+            reason: `ACK ${ack.commandId}`,
+            ip: 'device',
+          });
+        } else {
+          this.logger.error(`[ack] No se encontró siren ${deviceId} en BD`);
+        }
       }
     } catch (e: any) {
       this.logger.error(`Error handling topic "${topic}": ${e?.message || e}`);
@@ -258,7 +284,6 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         cause: 'auto',
       } as CommandPayload);
 
-      // ✅ Buscar sirenId real en la BD
       const siren = await this.devicesService.findByDeviceId(deviceId);
       if (siren) {
         await this.activationLog.record({

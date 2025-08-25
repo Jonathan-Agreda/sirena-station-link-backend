@@ -17,6 +17,9 @@ export class ActivationLogService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Registro genérico (ACCEPTED, REJECTED, FAILED, etc.)
+   */
   async record(evt: ActivationEvent) {
     this.logger.log(
       `[ACTIVATION] siren=${evt.sirenId} user=${evt.userId ?? '-'} action=${
@@ -42,6 +45,39 @@ export class ActivationLogService {
       );
     }
   }
+
+  /**
+   * Registro especializado para ACKs → EXECUTED
+   */
+  async recordExecuted(
+    sirenId: string,
+    commandId: string,
+    action: ActivationAction,
+  ) {
+    try {
+      await this.prisma.activationLog.create({
+        data: {
+          sirenId,
+          userId: null, // normalmente el ACK no viene con user
+          action,
+          result: ActivationResult.EXECUTED,
+          reason: `ACK commandId=${commandId}`,
+          ip: 'device',
+        },
+      });
+
+      this.logger.log(
+        `[ACTIVATION] siren=${sirenId} action=${action} result=EXECUTED (ACK ${commandId})`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `Error guardando ActivationLog EXECUTED: ${err.message}`,
+        err.stack,
+      );
+    }
+  }
+
+  // === Consultas ===
 
   async findAll(filter?: { userId?: string }) {
     return this.prisma.activationLog.findMany({
