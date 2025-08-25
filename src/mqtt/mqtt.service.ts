@@ -20,6 +20,7 @@ import {
 import { ActivationLogService } from '../devices/activation-log.service';
 import { ActivationAction, ActivationResult } from '@prisma/client';
 import { DevicesService } from '../devices/devices.service';
+import { WsGateway } from '../ws/ws.gateway';
 
 @Injectable()
 export class MqttService implements OnModuleInit, OnModuleDestroy {
@@ -32,7 +33,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly config: ConfigService,
     private readonly activationLog: ActivationLogService,
-    private readonly devicesService: DevicesService, // ✅ inyectamos DevicesService
+    private readonly devicesService: DevicesService,
+    private readonly ws: WsGateway, // ✅ inyectamos WsGateway
   ) {}
 
   onModuleInit() {
@@ -132,6 +134,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
     try {
       if (root === 'status' && sub === 'state') {
+        this.logger.warn(`[DEBUG-STATE-RAW] topic=${topic} msg=${msg}`);
         const data = this.safeJson<DeviceStatePayload>(msg);
         if (!data) return;
 
@@ -156,6 +159,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         this.logger.debug(
           `[state] ${id} → online=${state.online} relay=${state.relay} siren=${state.siren}`,
         );
+
+        // 🔔 Emitir al frontend
+        this.ws.emitEvent('device.state', state);
       }
 
       if (root === 'status' && sub === 'lwt') {
@@ -173,6 +179,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         };
         this.lastStates.set(id, offline);
         this.logger.warn(`[lwt] ${id} → offline`);
+
+        // 🔔 Emitir al frontend
+        this.ws.emitEvent('device.lwt', offline);
       }
 
       if (root === 'tele' && sub === 'heartbeat') {
@@ -181,7 +190,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         const prev = this.lastStates.get(id);
         const nowIso = hb.ts || new Date().toISOString();
 
-        this.lastStates.set(id, {
+        const updated = {
           deviceId: id,
           online: prev?.online ?? true,
           relay: prev?.relay ?? 'OFF',
@@ -189,13 +198,20 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           ip: prev?.ip,
           updatedAt: prev?.updatedAt ?? nowIso,
           lastHeartbeatAt: nowIso,
-        });
+        };
 
+        this.lastStates.set(id, updated);
         this.logger.debug(`[heartbeat] ${id} @ ${nowIso}`);
+
+        // 🔔 Emitir al frontend
+        this.ws.emitEvent('device.heartbeat', updated);
       }
 
       if (root === 'cmd' && sub === 'ack') {
         this.logger.debug(`[ack] ${deviceId} → ${msg}`);
+
+        // 🔔 Emitir al frontend
+        this.ws.emitEvent('device.ack', { deviceId, raw: msg });
       }
     } catch (e: any) {
       this.logger.error(`Error handling topic "${topic}": ${e?.message || e}`);
@@ -246,7 +262,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       const siren = await this.devicesService.findByDeviceId(deviceId);
       if (siren) {
         await this.activationLog.record({
-          sirenId: siren.id, // 🔹 usamos UUID correcto
+          sirenId: siren.id,
           userId: null,
           action: ActivationAction.OFF,
           result: ActivationResult.ACCEPTED,

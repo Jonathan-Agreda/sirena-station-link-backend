@@ -8,6 +8,7 @@ import { DataModule } from './data/data.module';
 import { AuthModule } from './auth/auth.module';
 import { MqttModule } from './mqtt/mqtt.module';
 import { DevicesModule } from './devices/devices.module';
+import { WsModule } from './ws/ws.module'; // 👈 usar el nuevo módulo
 
 @Module({
   imports: [
@@ -18,10 +19,11 @@ import { DevicesModule } from './devices/devices.module';
     }),
     DataModule,
     AuthModule,
-    forwardRef(() => MqttModule), // 🔹 se protege la referencia circular
+    forwardRef(() => MqttModule),
     forwardRef(() => DevicesModule),
+    WsModule, // 👈 ya no se declara WsGateway aquí
   ],
   controllers: [AppController, HealthController],
-  providers: [AppService],
+  providers: [AppService], // 👈 quitamos WsGateway de aquí
 })
 export class AppModule {}
