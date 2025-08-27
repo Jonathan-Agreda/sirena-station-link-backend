@@ -133,8 +133,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     const [root, deviceId, sub] = topic.split('/');
 
     try {
+      // --- STATE ---
       if (root === 'status' && sub === 'state') {
-        this.logger.warn(`[DEBUG-STATE-RAW] topic=${topic} msg=${msg}`);
+        this.logger.debug(`[DEBUG-STATE-RAW] topic=${topic} msg=${msg}`);
         const data = this.safeJson<DeviceStatePayload>(msg);
         if (!data) return;
 
@@ -142,6 +143,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         if (!id) return;
 
         const nowIso = new Date().toISOString();
+        const prev = this.lastStates.get(id);
+
         const state: LastState = {
           deviceId: id,
           online: data.online ?? true,
@@ -149,12 +152,10 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           siren: data.siren,
           ip: data.ip,
           updatedAt: data.updatedAt || nowIso,
+          lastHeartbeatAt: prev?.lastHeartbeatAt,
         };
 
-        this.lastStates.set(id, {
-          ...(this.lastStates.get(id) || state),
-          ...state,
-        });
+        this.lastStates.set(id, { ...(prev || state), ...state });
 
         this.logger.debug(
           `[state] ${id} → online=${state.online} relay=${state.relay} siren=${state.siren}`,
@@ -163,6 +164,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         this.ws.emitEvent('device.state', state);
       }
 
+      // --- LWT ---
       if (root === 'status' && sub === 'lwt') {
         const id = deviceId;
         const prev = this.lastStates.get(id);
@@ -182,13 +184,14 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         this.ws.emitEvent('device.lwt', offline);
       }
 
+      // --- HEARTBEAT ---
       if (root === 'tele' && sub === 'heartbeat') {
         const hb = this.safeJson<HeartbeatPayload>(msg) || { deviceId };
         const id = hb.deviceId || deviceId;
         const prev = this.lastStates.get(id);
         const nowIso = hb.ts || new Date().toISOString();
 
-        const updated = {
+        const updated: LastState = {
           deviceId: id,
           online: prev?.online ?? true,
           relay: prev?.relay ?? 'OFF',
@@ -204,6 +207,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         this.ws.emitEvent('device.heartbeat', updated);
       }
 
+      // --- ACK ---
       if (root === 'cmd' && sub === 'ack') {
         this.logger.debug(`[ack] ${deviceId} → ${msg}`);
 
@@ -216,18 +220,30 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         this.ws.emitEvent('device.ack', {
           deviceId,
           commandId: ack.commandId,
+          action: ack.action ?? 'UNKNOWN',
           result: ack.result,
           ts: ack.ts ?? new Date().toISOString(),
         });
 
-        // 📝 Guardar log EXECUTED
+        // 📝 Guardar EXECUTED solo desde ACK
         const siren = await this.devicesService.findByDeviceId(deviceId);
         if (siren) {
+          let action: ActivationAction;
+          if (ack.action === 'OFF') action = ActivationAction.OFF;
+          else if (ack.action === 'ON') action = ActivationAction.ON;
+          else {
+            const prev = this.lastStates.get(deviceId);
+            action =
+              prev?.relay === 'ON' ? ActivationAction.ON : ActivationAction.OFF;
+            this.logger.debug(
+              `[ack] action ausente en ACK, se infiere como ${action}`,
+            );
+          }
+
           await this.activationLog.record({
             sirenId: siren.id,
             userId: null,
-            action:
-              ack.action === 'OFF' ? ActivationAction.OFF : ActivationAction.ON,
+            action,
             result:
               ack.result === 'OK'
                 ? ActivationResult.EXECUTED

@@ -1,17 +1,28 @@
 // Cliente de prueba WebSocket (Socket.IO) para SirenaStationLink
+// Si ves el warning de "MODULE_TYPELESS_PACKAGE_JSON",
+// agrega "type": "module" a tu package.json o renombra este archivo a .mjs.
 
 import { io } from 'socket.io-client';
 
 // ⚠️ Ajusta si tu backend corre en otro host/puerto
-const socket = io('http://localhost:4000/ws', {
+const WS_URL = process.env.WS_URL ?? 'http://localhost:4000/ws';
+
+const socket = io(WS_URL, {
   transports: ['websocket'], // fuerza solo WebSocket
 });
 
 socket.on('connect', () => {
   console.log('✅ Conectado al servidor WS:', socket.id);
-
   // Enviamos un ping de prueba
   socket.emit('ping', { hello: 'world' });
+});
+
+socket.on('connect_error', (err) => {
+  console.error('⚠️ connect_error:', err?.message || err);
+});
+
+socket.on('error', (err) => {
+  console.error('⚠️ socket error:', err);
 });
 
 socket.on('disconnect', (reason) => {
