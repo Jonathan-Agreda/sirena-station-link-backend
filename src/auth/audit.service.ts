@@ -4,7 +4,7 @@ import { AuditAction } from '@prisma/client';
 
 export type AuditEvent = {
   action: 'login' | 'logout' | 'revocation';
-  userId?: string; // Ojo: ahora opcional
+  userId?: string; // Puede venir como id interno o como keycloakId
   username?: string;
   sessionId?: string;
   reason?: string;
@@ -30,14 +30,24 @@ export class AuditService {
     try {
       let userIdToSave: string | null = null;
 
-      // ⚠️ Validar que el userId realmente exista en tabla User
       if (evt.userId && evt.userId !== '-') {
+        // Primero intentamos como id interno
         const exists = await this.prisma.user.findUnique({
           where: { id: evt.userId },
           select: { id: true },
         });
+
         if (exists) {
-          userIdToSave = evt.userId;
+          userIdToSave = exists.id;
+        } else {
+          // Si no existe, intentamos como keycloakId
+          const byKeycloak = await this.prisma.user.findUnique({
+            where: { keycloakId: evt.userId },
+            select: { id: true },
+          });
+          if (byKeycloak) {
+            userIdToSave = byKeycloak.id; // mapeamos al id interno (ej: user-001)
+          }
         }
       }
 
@@ -45,7 +55,7 @@ export class AuditService {
       await this.prisma.auditLog.create({
         data: {
           action: evt.action as AuditAction,
-          userId: userIdToSave, // ← ya validado
+          userId: userIdToSave, // ahora sí es el id interno si existe
           username: evt.username,
           sessionId: evt.sessionId,
           reason: evt.reason,
