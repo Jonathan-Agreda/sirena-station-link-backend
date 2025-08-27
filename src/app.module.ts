@@ -9,6 +9,11 @@ import { AuthModule } from './auth/auth.module';
 import { MqttModule } from './mqtt/mqtt.module';
 import { DevicesModule } from './devices/devices.module';
 import { WsModule } from './ws/ws.module'; // 👈 usar el nuevo módulo
+import { UrbanizationsModule } from './urbanizations/urbanizations.module';
+import { UsersModule } from './users/users.module';
+import { SirensModule } from './sirens/sirens.module';
+import { GroupsModule } from './groups/groups.module';
+import { ActivationLogsModule } from './activation-logs/activation-logs.module';
 
 @Module({
   imports: [
@@ -21,7 +26,12 @@ import { WsModule } from './ws/ws.module'; // 👈 usar el nuevo módulo
     AuthModule,
     forwardRef(() => MqttModule),
     forwardRef(() => DevicesModule),
-    WsModule, // 👈 ya no se declara WsGateway aquí
+    WsModule,
+    UrbanizationsModule,
+    UsersModule,
+    SirensModule,
+    GroupsModule,
+    ActivationLogsModule, // 👈 ya no se declara WsGateway aquí
   ],
   controllers: [AppController, HealthController],
   providers: [AppService], // 👈 quitamos WsGateway de aquí

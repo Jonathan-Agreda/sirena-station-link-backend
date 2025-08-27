@@ -45,7 +45,6 @@ export class KeycloakAdminService {
     return process.env.KEYCLOAK_CLIENT_ID || 'backend-api';
   }
   private adminClientSecret() {
-    // AÑADE ESTA LÍNEA PARA DEPURAR
     this.logger.debug(
       `Using Client Secret: '${process.env.KEYCLOAK_CLIENT_SECRET}'`,
     );
@@ -99,6 +98,7 @@ export class KeycloakAdminService {
     return this.http;
   }
 
+  // 🔎 Buscar usuario por username o email
   async findUserId(usernameOrEmail: string): Promise<KCUser | null> {
     const http = await this.client();
 
@@ -118,6 +118,7 @@ export class KeycloakAdminService {
     return null;
   }
 
+  // 📡 Listar sesiones de usuario
   async listUserSessions(userId: string): Promise<KCUserSession[]> {
     const http = await this.client();
     const res = await http.get(`/users/${userId}/sessions`, {
@@ -162,5 +163,71 @@ export class KeycloakAdminService {
       validateStatus: () => true,
     });
     return res.status >= 200 && res.status < 300;
+  }
+
+  // 🚀 Crear usuario en Keycloak
+  async createUser(opts: {
+    username: string;
+    email: string;
+    role: string;
+    temporaryPassword?: string;
+  }): Promise<{ id: string }> {
+    const http = await this.client();
+
+    // 1. Crear usuario
+    const res = await http.post(
+      `/users`,
+      {
+        username: opts.username,
+        email: opts.email,
+        enabled: true,
+        credentials: opts.temporaryPassword
+          ? [
+              {
+                type: 'password',
+                value: opts.temporaryPassword,
+                temporary: true,
+              },
+            ]
+          : undefined,
+      },
+      { validateStatus: () => true },
+    );
+
+    if (!(res.status === 201 || res.status === 204)) {
+      this.logger.error(
+        `createUser error ${res.status}: ${JSON.stringify(res.data)}`,
+      );
+      throw new Error('Keycloak createUser failed');
+    }
+
+    const location = res.headers['location'] as string;
+    const id = location.split('/').pop();
+
+    // 2. Asignar rol
+    await this.assignRealmRole(id!, opts.role);
+
+    return { id: id! };
+  }
+
+  // 🔑 Asignar rol de realm a usuario
+  async assignRealmRole(userId: string, roleName: string) {
+    const http = await this.client();
+
+    const { data: role } = await http.get(`/roles/${roleName}`, {
+      validateStatus: () => true,
+    });
+
+    const res = await http.post(
+      `/users/${userId}/role-mappings/realm`,
+      [role],
+      { validateStatus: () => true },
+    );
+
+    if (!(res.status >= 200 && res.status < 300)) {
+      this.logger.error(
+        `assignRealmRole error ${res.status}: ${JSON.stringify(res.data)}`,
+      );
+    }
   }
 }
