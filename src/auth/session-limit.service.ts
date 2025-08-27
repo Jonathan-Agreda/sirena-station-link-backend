@@ -30,12 +30,12 @@ export class SessionLimitService {
 
   /** Lee override de sesiones desde BD; si no hay, aplica política por rol. */
   private async maxSessionsFor(
-    userId: string,
+    keycloakId: string,
     roles: string[] = [],
   ): Promise<number> {
     try {
       const dbUser = await this.prisma.user.findUnique({
-        where: { id: userId },
+        where: { keycloakId }, // 🔹 CAMBIO: buscamos por keycloakId
         select: { sessionLimit: true },
       });
 
@@ -44,7 +44,7 @@ export class SessionLimitService {
       }
     } catch (e) {
       this.logger.warn(
-        `No se pudo leer sessionLimit para userId=${userId}: ${e?.message ?? e}`,
+        `No se pudo leer sessionLimit para keycloakId=${keycloakId}: ${e?.message ?? e}`,
       );
     }
 
