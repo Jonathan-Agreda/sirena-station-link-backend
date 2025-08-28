@@ -9,11 +9,12 @@ import { OidcService } from './oidc.service';
 import { PrismaService } from '../data/prisma.service';
 
 export type AuthUser = {
-  sub: string; // keycloakId
+  sub: string; // keycloakId (OIDC "sub")
+  userId?: string; // <-- ID interno de User (tabla local)
   email?: string;
   username?: string;
   roles: string[];
-  urbanizationId?: string | null; // 👈 añadimos urbanizationId
+  urbanizationId?: string | null;
   raw: any;
 };
 
@@ -21,7 +22,7 @@ export type AuthUser = {
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly oidc: OidcService,
-    private readonly prisma: PrismaService, // 👈 inyectamos Prisma
+    private readonly prisma: PrismaService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -37,18 +38,16 @@ export class AuthGuard implements CanActivate {
       const { payload } = await this.oidc.verifyAccessToken(token);
       const p = payload as Record<string, any>;
 
-      // roles seguros
       const roles: string[] = Array.isArray(p?.realm_access?.roles)
         ? p.realm_access.roles
         : [];
 
-      // username seguro
       const username: string | undefined =
         (typeof p?.preferred_username === 'string' && p.preferred_username) ||
         (typeof p?.username === 'string' && p.username) ||
         undefined;
 
-      // 🔎 Buscar usuario en BD para enriquecer con urbanizationId
+      // Enriquecer con userId (interno) y urbanizationId desde la BD
       const userDb = await this.prisma.user.findUnique({
         where: { keycloakId: String(p.sub) },
         select: { id: true, urbanizationId: true },
@@ -56,10 +55,11 @@ export class AuthGuard implements CanActivate {
 
       const user: AuthUser = {
         sub: String(p.sub),
+        userId: userDb?.id ?? undefined, // <-- añadido
         email: typeof p?.email === 'string' ? p.email : undefined,
         username,
         roles,
-        urbanizationId: userDb?.urbanizationId || null, // 👈 importante
+        urbanizationId: userDb?.urbanizationId || null,
         raw: p,
       };
 

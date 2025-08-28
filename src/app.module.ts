@@ -8,12 +8,13 @@ import { DataModule } from './data/data.module';
 import { AuthModule } from './auth/auth.module';
 import { MqttModule } from './mqtt/mqtt.module';
 import { DevicesModule } from './devices/devices.module';
-import { WsModule } from './ws/ws.module'; // 👈 usar el nuevo módulo
+import { WsModule } from './ws/ws.module';
 import { UrbanizationsModule } from './urbanizations/urbanizations.module';
 import { UsersModule } from './users/users.module';
 import { SirensModule } from './sirens/sirens.module';
 import { GroupsModule } from './groups/groups.module';
 import { ActivationLogsModule } from './activation-logs/activation-logs.module';
+import { AssignmentsModule } from './assignments/assignments.module'; // 👈 importar módulo
 
 @Module({
   imports: [
@@ -31,9 +32,10 @@ import { ActivationLogsModule } from './activation-logs/activation-logs.module';
     UsersModule,
     SirensModule,
     GroupsModule,
-    ActivationLogsModule, // 👈 ya no se declara WsGateway aquí
+    ActivationLogsModule,
+    AssignmentsModule, // 👈 registrar aquí
   ],
   controllers: [AppController, HealthController],
-  providers: [AppService], // 👈 quitamos WsGateway de aquí
+  providers: [AppService],
 })
 export class AppModule {}
