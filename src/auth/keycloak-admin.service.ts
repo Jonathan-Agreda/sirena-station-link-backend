@@ -20,6 +20,8 @@ type TokenResponse = {
   scope?: string;
 };
 
+type RoleRepresentation = { id: string; name: string };
+
 @Injectable()
 export class KeycloakAdminService {
   private readonly logger = new Logger(KeycloakAdminService.name);
@@ -45,10 +47,10 @@ export class KeycloakAdminService {
     return process.env.KEYCLOAK_CLIENT_ID || 'backend-api';
   }
   private adminClientSecret() {
-    this.logger.debug(
-      `Using Client Secret: '${process.env.KEYCLOAK_CLIENT_SECRET}'`,
-    );
-    return process.env.KEYCLOAK_CLIENT_SECRET || '';
+    const secret = process.env.KEYCLOAK_CLIENT_SECRET || '';
+    // Evitar exponer secretos en logs
+    this.logger.debug(`Using Client Secret: [REDACTED len=${secret.length}]`);
+    return secret;
   }
 
   private isTokenValid() {
@@ -202,12 +204,13 @@ export class KeycloakAdminService {
     }
 
     const location = res.headers['location'] as string;
-    const id = location.split('/').pop();
+    const id = location?.split('/').pop();
+    if (!id) throw new Error('Keycloak createUser: no Location/ID');
 
     // 2. Asignar rol
-    await this.assignRealmRole(id!, opts.role);
+    await this.assignRealmRole(id, opts.role);
 
-    return { id: id! };
+    return { id };
   }
 
   // 🔑 Asignar rol de realm a usuario
@@ -229,5 +232,94 @@ export class KeycloakAdminService {
         `assignRealmRole error ${res.status}: ${JSON.stringify(res.data)}`,
       );
     }
+  }
+
+  // 🧩 Actualizar perfil (username/email/enabled)
+  async updateUserProfile(
+    userId: string,
+    data: { username?: string; email?: string; enabled?: boolean },
+  ): Promise<boolean> {
+    const http = await this.client();
+    const body: Record<string, unknown> = {};
+    if (data.username !== undefined) body.username = data.username;
+    if (data.email !== undefined) body.email = data.email;
+    if (data.enabled !== undefined) body.enabled = data.enabled;
+
+    if (Object.keys(body).length === 0) return true; // nada que actualizar
+
+    const res = await http.put(`/users/${userId}`, body, {
+      validateStatus: () => true,
+    });
+
+    if (!(res.status >= 200 && res.status < 300)) {
+      this.logger.error(
+        `updateUserProfile error ${res.status}: ${JSON.stringify(res.data)}`,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  // 📚 Utilidades de roles
+  async getRoleByName(roleName: string): Promise<RoleRepresentation> {
+    const http = await this.client();
+    const { data, status } = await http.get(`/roles/${roleName}`, {
+      validateStatus: () => true,
+    });
+    if (status !== 200) {
+      throw new Error(`getRoleByName ${status}: ${JSON.stringify(data)}`);
+    }
+    return data as RoleRepresentation;
+  }
+
+  async getUserRealmRoles(userId: string): Promise<RoleRepresentation[]> {
+    const http = await this.client();
+    const { data, status } = await http.get(
+      `/users/${userId}/role-mappings/realm`,
+      { validateStatus: () => true },
+    );
+    if (status !== 200) {
+      this.logger.error(`getUserRealmRoles ${status}: ${JSON.stringify(data)}`);
+      return [];
+    }
+    return data as RoleRepresentation[];
+  }
+
+  // 🔁 Reemplazar el rol (quita nuestros roles gestionados y asigna el nuevo)
+  async replaceRealmRole(userId: string, newRoleName: string) {
+    const http = await this.client();
+    const current = await this.getUserRealmRoles(userId);
+    const managed = ['SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE'];
+    const toRemove = current.filter((r) => managed.includes(r.name));
+
+    if (toRemove.length) {
+      const del = await http.delete(`/users/${userId}/role-mappings/realm`, {
+        data: toRemove,
+        validateStatus: () => true,
+      });
+      if (!(del.status >= 200 && del.status < 300)) {
+        this.logger.error(
+          `replaceRealmRole(delete) ${del.status}: ${JSON.stringify(del.data)}`,
+        );
+        throw new Error('Keycloak remove roles failed');
+      }
+    }
+
+    await this.assignRealmRole(userId, newRoleName);
+  }
+
+  // 🗑️ Borrar usuario
+  async deleteUser(userId: string): Promise<boolean> {
+    const http = await this.client();
+    const res = await http.delete(`/users/${userId}`, {
+      validateStatus: () => true,
+    });
+    if (!(res.status >= 200 && res.status < 300)) {
+      this.logger.error(
+        `deleteUser error ${res.status}: ${JSON.stringify(res.data)}`,
+      );
+      return false;
+    }
+    return true;
   }
 }

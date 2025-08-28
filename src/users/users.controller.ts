@@ -8,7 +8,7 @@ import {
   Delete,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { Role } from '@prisma/client'; // 👈 Importamos el enum para tipar correctamente
+import { Role } from '@prisma/client';
 
 @Controller('users')
 export class UsersController {
@@ -28,7 +28,7 @@ export class UsersController {
   create(
     @Body()
     body: {
-      username: string; // 👈 obligatorio
+      username: string; // 👈 obligatorio en alta
       email: string;
       role: Role;
       urbanizationId?: string;
@@ -46,13 +46,14 @@ export class UsersController {
     @Param('id') id: string,
     @Body()
     body: Partial<{
-      username: string;
-      email: string;
-      role: Role;
-      etapa: string;
+      email: string; // ✅ solo email editable en Keycloak
+      role: Role; // ✅ role editable en Keycloak
+      etapa: string; // ✅ campos locales
       manzana: string;
       villa: string;
       alicuota: boolean;
+      urbanizationId: string;
+      sessionLimit: number | null;
     }>,
   ) {
     return this.svc.update(id, body);
@@ -61,5 +62,20 @@ export class UsersController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.svc.remove(id);
+  }
+
+  // 🔥 Listar sesiones activas de un usuario
+  @Get(':id/sessions')
+  listSessions(@Param('id') id: string) {
+    return this.svc.listSessions(id);
+  }
+
+  // 🔥 Cerrar sesión remota
+  @Delete(':id/sessions/:sessionId')
+  terminateSession(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.svc.terminateSession(id, sessionId);
   }
 }
