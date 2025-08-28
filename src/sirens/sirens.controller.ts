@@ -8,13 +8,19 @@ import {
   Delete,
   UseGuards,
   Req,
+  UploadedFile,
+  Query,
+  BadRequestException,
+  Header,
+  UseInterceptors,
 } from '@nestjs/common';
 import { SirensService } from './sirens.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
-import type { Request } from 'express';
+import type { Request, Express } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('sirens')
 @UseGuards(AuthGuard, RolesGuard)
@@ -73,5 +79,43 @@ export class SirensController {
   @Roles(Role.SUPERADMIN)
   remove(@Param('id') id: string) {
     return this.svc.remove(id);
+  }
+
+  // 🚀 BULK IMPORT (Excel: deviceId | apiKey | urbanizationId | lat | lng)
+  @Post('bulk/import')
+  @Roles(Role.SUPERADMIN)
+  @UseInterceptors(FileInterceptor('file'))
+  async bulkImportSirens(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('dryRun') dryRun = 'true',
+  ) {
+    if (!file) {
+      throw new BadRequestException('Excel file is required (field "file")');
+    }
+    const isDry = String(dryRun).toLowerCase() !== 'false';
+    return this.svc.bulkImportSirens(file.buffer, { dryRun: isDry });
+  }
+
+  // 🚀 BULK DELETE (Excel: deviceId)
+  @Post('bulk/delete')
+  @Roles(Role.SUPERADMIN)
+  @UseInterceptors(FileInterceptor('file'))
+  async bulkDeleteSirens(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('Excel file is required (field "file")');
+    }
+    return this.svc.bulkDeleteSirens(file.buffer);
+  }
+
+  // 🚀 TEMPLATE (Excel ejemplo)
+  @Get('bulk/template')
+  @Roles(Role.SUPERADMIN)
+  @Header(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+  @Header('Content-Disposition', 'attachment; filename="sirens_template.xlsx"')
+  async sirensTemplate() {
+    return this.svc.buildSirensTemplate();
   }
 }

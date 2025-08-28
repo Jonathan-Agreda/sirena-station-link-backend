@@ -8,13 +8,19 @@ import {
   Delete,
   UseGuards,
   Req,
+  UploadedFile,
+  Query,
+  BadRequestException,
+  Header,
+  UseInterceptors,
 } from '@nestjs/common';
 import { UrbanizationsService } from './urbanizations.service';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { Role } from '@prisma/client';
-import type { Request } from 'express';
+import type { Request, Express } from 'express'; // ✅ usar `import type` por isolatedModules
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('urbanizations')
 @UseGuards(AuthGuard, RolesGuard)
@@ -38,7 +44,7 @@ export class UrbanizationsController {
   @Get()
   @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
   findAll(@Req() req: Request) {
-    const user = req['user']; // viene del token OIDC enriquecido
+    const user = req['user'];
     return this.svc.findAll(user);
   }
 
@@ -72,5 +78,54 @@ export class UrbanizationsController {
   remove(@Param('id') id: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.remove(id, user);
+  }
+
+  // 🚀 BULK IMPORT (Excel con columnas: name | maxUsers)
+  @Post('bulk/import')
+  @Roles(Role.SUPERADMIN)
+  @UseInterceptors(FileInterceptor('file'))
+  async bulkImportUrbanizations(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: Request,
+    @Query('dryRun') dryRun = 'true',
+  ) {
+    if (!file) {
+      throw new BadRequestException('Excel file is required (field "file")');
+    }
+    const user = req['user'];
+    const isDry = String(dryRun).toLowerCase() !== 'false';
+    return this.svc.bulkImportUrbanizations(file.buffer, user, {
+      dryRun: isDry,
+    });
+  }
+
+  // 🚀 BULK DELETE (Excel con columna: name)
+  @Post('bulk/delete')
+  @Roles(Role.SUPERADMIN)
+  @UseInterceptors(FileInterceptor('file'))
+  async bulkDeleteUrbanizations(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: Request,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Excel file is required (field "file")');
+    }
+    const user = req['user'];
+    return this.svc.bulkDeleteUrbanizations(file.buffer, user);
+  }
+
+  // 🚀 TEMPLATE (descarga ejemplo .xlsx)
+  @Get('bulk/template')
+  @Roles(Role.SUPERADMIN)
+  @Header(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+  @Header(
+    'Content-Disposition',
+    'attachment; filename="urbanizations_template.xlsx"',
+  )
+  async urbTemplate() {
+    return this.svc.buildUrbanizationsTemplate();
   }
 }
