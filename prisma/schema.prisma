@@ -6,6 +6,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 // ---------- Enums ----------
@@ -90,11 +91,11 @@ model User {
 
 model Siren {
   id             String      @id @default(uuid())
-  deviceId       String      @unique // = MQTT ClientID
-  apiKey         String               // = MQTT password (NO exponer en tópicos)
+  deviceId       String      @unique
+  apiKey         String
   ip             String?
   online         Boolean     @default(false)
-  relay          SwitchState @default(OFF) // Regla MVP: relay=ON => siren=ON
+  relay          SwitchState @default(OFF)
   sirenState     SwitchState @default(OFF)
   lastSeen       DateTime?
 
@@ -104,15 +105,18 @@ model Siren {
   urbanizationId String
   urbanization   Urbanization @relation(fields: [urbanizationId], references: [id], onDelete: Cascade)
 
-  // Relaciones
-  groups     GroupMember[]
-  residents  Assignment[]
-  logs       ActivationLog[]
+  // 🚨 Relación directa: cada sirena puede estar en **1 solo grupo**
+  groupId        String?
+  group          Group? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  residents      Assignment[]
+  logs           ActivationLog[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([urbanizationId])
+  @@index([groupId])
 }
 
 model Group {
@@ -120,25 +124,16 @@ model Group {
   name           String
   urbanizationId String
   urbanization   Urbanization @relation(fields: [urbanizationId], references: [id], onDelete: Cascade)
-  members        GroupMember[]
+
+  // 🚨 Ahora los grupos tienen un array de sirenas directamente
+  sirens         Siren[]
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  @@unique([urbanizationId, name]) // nombre único por urbanización
+  @@unique([urbanizationId, name])
 }
 
-model GroupMember {
-  id       String @id @default(uuid())
-  groupId  String
-  sirenId  String
-  group    Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  siren    Siren  @relation(fields: [sirenId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-
-  @@unique([groupId, sirenId])
-  @@index([sirenId])
-}
 
 model Assignment {
   id       String @id @default(uuid())
