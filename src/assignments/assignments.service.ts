@@ -2,18 +2,35 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../data/prisma.service';
-import { Role } from '@prisma/client';
+import { Role, type User, type Siren } from '@prisma/client';
 import type { AuthUser } from '../auth/auth.guard';
+import * as ExcelJS from 'exceljs';
+
+type BulkOptions = { dryRun?: boolean };
+
+function normalizeKey(s?: string) {
+  return (s || '').toString().trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function parseBoolean(v: any, fallback = true): boolean {
+  if (typeof v === 'boolean') return v;
+  if (v == null) return fallback;
+  const s = String(v).trim().toLowerCase();
+  if (['1', 'true', 'verdadero', 'sí', 'si', 'y', 'yes'].includes(s))
+    return true;
+  if (['0', 'false', 'falso', 'no', 'n'].includes(s)) return false;
+  return fallback;
+}
 
 @Injectable()
 export class AssignmentsService {
   constructor(private prisma: PrismaService) {}
 
-  // Crear asignación (SUPERADMIN/ADMIN)
+  // ✅ Crear asignación (individual)
   async assign(userId: string, sirenId: string, currentUser: AuthUser) {
-    // 🚨 Si es ADMIN, solo puede asignar dentro de su urbanización
     if (currentUser.roles.includes(Role.ADMIN)) {
       if (!currentUser.urbanizationId) {
         throw new ForbiddenException('Admin sin urbanización asignada');
@@ -43,7 +60,7 @@ export class AssignmentsService {
     });
   }
 
-  // Quitar asignación (SUPERADMIN/ADMIN)
+  // ✅ Quitar asignación
   async unassign(id: string) {
     const assignment = await this.prisma.assignment.findUnique({
       where: { id },
@@ -52,13 +69,10 @@ export class AssignmentsService {
     return this.prisma.assignment.delete({ where: { id } });
   }
 
-  // Listar asignaciones por usuario
+  // 🔎 Listar por usuario
   async findByUser(userId: string, currentUser: AuthUser) {
-    // 👮‍♂️ Restricción: ADMIN solo su urbanización
     if (currentUser.roles.includes(Role.ADMIN)) {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-      });
+      const user = await this.prisma.user.findUnique({ where: { id: userId } });
       if (!user || user.urbanizationId !== currentUser.urbanizationId) {
         throw new ForbiddenException(
           'No puedes ver asignaciones de otra urbanización',
@@ -72,7 +86,7 @@ export class AssignmentsService {
     });
   }
 
-  // Listar asignaciones por sirena
+  // 🔎 Listar por sirena
   async findBySiren(sirenId: string, currentUser: AuthUser) {
     if (currentUser.roles.includes(Role.ADMIN)) {
       const siren = await this.prisma.siren.findUnique({
@@ -89,5 +103,278 @@ export class AssignmentsService {
       where: { sirenId, active: true },
       include: { user: true },
     });
+  }
+
+  // 📦 Excel helper (lee filas válidas si CUALQUIER campo relevante tiene datos)
+  private async readSheet(buffer: Uint8Array | ArrayBuffer) {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as any);
+    const sheet = wb.worksheets[0];
+    if (!sheet) throw new BadRequestException('Workbook has no sheets');
+
+    const headerRow = sheet.getRow(1);
+    const headers: string[] = [];
+    headerRow.eachCell((cell, col) => {
+      headers[col] = normalizeKey(String(cell.value ?? ''));
+    });
+
+    const important = new Set([
+      'userid',
+      'email',
+      'username',
+      'sirenid',
+      'deviceid',
+      'active',
+    ]);
+
+    const colCount = Math.max(
+      headerRow.cellCount,
+      headers.length,
+      sheet.columnCount || 0,
+    );
+
+    const rows: Record<string, any>[] = [];
+    for (let r = 2; r <= sheet.rowCount; r++) {
+      const row = sheet.getRow(r);
+
+      let hasData = false;
+      const obj: Record<string, any> = {};
+
+      for (let c = 1; c <= colCount; c++) {
+        const key = headers[c];
+        if (!key) continue;
+
+        let val: any = row.getCell(c).value;
+        if (val && typeof val === 'object' && 'text' in (val as any)) {
+          val = (val as any).text;
+        }
+        if (!hasData && important.has(key)) {
+          const s = val == null ? '' : String(val).trim();
+          if (s !== '') hasData = true;
+        }
+        obj[key] = val;
+      }
+
+      if (!hasData) continue;
+      rows.push(obj);
+    }
+    return rows;
+  }
+
+  // 🔧 helpers de resolución
+  private async resolveUserByRefs(
+    userId: string,
+    email: string,
+    username: string,
+  ) {
+    let user: User | null = null;
+    if (userId) {
+      user = await this.prisma.user.findUnique({ where: { id: userId } });
+    } else if (email && email.includes('@')) {
+      user = await this.prisma.user.findUnique({ where: { email } });
+    } else {
+      const uname = username || (email && !email.includes('@') ? email : '');
+      if (uname)
+        user = await this.prisma.user.findUnique({
+          where: { username: uname },
+        });
+    }
+    return user;
+  }
+
+  private async resolveSirenByRefs(sirenId: string, deviceId: string) {
+    let siren: Siren | null = null;
+    if (sirenId) {
+      siren = await this.prisma.siren.findUnique({ where: { id: sirenId } });
+    } else if (deviceId) {
+      siren = await this.prisma.siren.findUnique({ where: { deviceId } });
+    }
+    return siren;
+  }
+
+  // 🚀 Bulk import (userId|email|username y sirenId|deviceId)
+  async bulkImportAssignments(
+    buffer: Uint8Array | ArrayBuffer,
+    currentUser: AuthUser,
+    opts: BulkOptions = {},
+  ) {
+    const { dryRun = true } = opts;
+    const rows = await this.readSheet(buffer);
+
+    let toCreate = 0,
+      toUpdate = 0;
+    const report: any[] = [];
+
+    for (const raw of rows) {
+      const userId = String(raw['userid'] ?? '').trim();
+      const email = String(raw['email'] ?? '')
+        .trim()
+        .toLowerCase();
+      const username = String(raw['username'] ?? '').trim();
+
+      const sirenId = String(raw['sirenid'] ?? '').trim();
+      const deviceId = String(raw['deviceid'] ?? '').trim();
+
+      const user = await this.resolveUserByRefs(userId, email, username);
+      const siren = await this.resolveSirenByRefs(sirenId, deviceId);
+      const active = parseBoolean(raw['active'], true);
+
+      if (!user || !siren) {
+        report.push({
+          userRef: userId || email || username,
+          sirenRef: sirenId || deviceId,
+          status: 'error',
+          error: 'User or Siren not found',
+        });
+        continue;
+      }
+
+      if (currentUser.roles.includes(Role.ADMIN)) {
+        if (
+          !user.urbanizationId ||
+          !siren.urbanizationId ||
+          user.urbanizationId !== currentUser.urbanizationId ||
+          siren.urbanizationId !== currentUser.urbanizationId
+        ) {
+          report.push({
+            user: user.email,
+            siren: siren.deviceId,
+            status: 'error',
+            error: 'User or Siren outside your urbanization',
+          });
+          continue;
+        }
+      }
+
+      const existing = await this.prisma.assignment.findFirst({
+        where: { userId: user.id, sirenId: siren.id },
+      });
+
+      if (!existing) {
+        toCreate++;
+        if (!dryRun) {
+          await this.prisma.assignment.create({
+            data: { userId: user.id, sirenId: siren.id, active },
+          });
+        }
+        report.push({
+          user: user.email,
+          siren: siren.deviceId,
+          status: dryRun ? 'would_create' : 'created',
+        });
+      } else {
+        toUpdate++;
+        if (!dryRun) {
+          await this.prisma.assignment.update({
+            where: { id: existing.id },
+            data: { active },
+          });
+        }
+        report.push({
+          user: user.email,
+          siren: siren.deviceId,
+          status: dryRun ? 'would_update' : 'updated',
+        });
+      }
+    }
+
+    return { dryRun, toCreate, toUpdate, processed: rows.length, report };
+  }
+
+  // 🚀 Bulk delete (userId|email|username y sirenId|deviceId)
+  async bulkDeleteAssignments(
+    buffer: Uint8Array | ArrayBuffer,
+    currentUser: AuthUser,
+  ) {
+    const rows = await this.readSheet(buffer);
+
+    let removed = 0;
+    const report: any[] = [];
+
+    for (const raw of rows) {
+      const userId = String(raw['userid'] ?? '').trim();
+      const email = String(raw['email'] ?? '')
+        .trim()
+        .toLowerCase();
+      const username = String(raw['username'] ?? '').trim();
+
+      const sirenId = String(raw['sirenid'] ?? '').trim();
+      const deviceId = String(raw['deviceid'] ?? '').trim();
+
+      const user = await this.resolveUserByRefs(userId, email, username);
+      const siren = await this.resolveSirenByRefs(sirenId, deviceId);
+
+      if (!user || !siren) {
+        report.push({
+          userRef: userId || email || username,
+          sirenRef: sirenId || deviceId,
+          status: 'error',
+          error: 'User or Siren not found',
+        });
+        continue;
+      }
+
+      const existing = await this.prisma.assignment.findFirst({
+        where: { userId: user.id, sirenId: siren.id },
+      });
+      if (!existing) {
+        report.push({
+          user: user.email,
+          siren: siren.deviceId,
+          status: 'not_found',
+        });
+        continue;
+      }
+
+      if (currentUser.roles.includes(Role.ADMIN)) {
+        if (
+          !user.urbanizationId ||
+          !siren.urbanizationId ||
+          user.urbanizationId !== currentUser.urbanizationId ||
+          siren.urbanizationId !== currentUser.urbanizationId
+        ) {
+          report.push({
+            user: user.email,
+            siren: siren.deviceId,
+            status: 'forbidden',
+          });
+          continue;
+        }
+      }
+
+      await this.prisma.assignment.delete({ where: { id: existing.id } });
+      removed++;
+      report.push({
+        user: user.email,
+        siren: siren.deviceId,
+        status: 'deleted',
+      });
+    }
+
+    return { removed, processed: rows.length, report };
+  }
+
+  // 📄 Template Excel
+  async buildAssignmentsTemplate(): Promise<Buffer> {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('assignments');
+
+    ws.addRow(['userId', 'email', 'username', 'sirenId', 'deviceId', 'active']);
+    ws.addRow([
+      'user-uuid-1',
+      'jane@example.com',
+      '',
+      'siren-uuid-1',
+      '',
+      true,
+    ]);
+    ws.addRow(['', '', 'juanito', '', 'SRN-001', false]);
+
+    // Congela encabezado (opcional)
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+    // Generar binario válido
+    const out = await wb.xlsx.writeBuffer();
+    return Buffer.isBuffer(out) ? out : Buffer.from(out as ArrayBuffer);
   }
 }

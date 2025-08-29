@@ -13,13 +13,14 @@ import {
   BadRequestException,
   Header,
   UseInterceptors,
+  Res,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { AuthGuard } from '../auth/auth.guard';
-import type { Request, Express } from 'express';
+import type { Request, Express, Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('users')
@@ -56,9 +57,15 @@ export class UsersController {
       email: string;
       role: Role;
       urbanizationId?: string;
-      etapa?: string;
-      manzana?: string;
-      villa?: string;
+
+      // nuevos
+      firstName?: string | null;
+      lastName?: string | null;
+      cedula?: string | null;
+      etapa?: string | null;
+      manzana?: string | null;
+      villa?: string | null;
+
       alicuota?: boolean;
     },
     @Req() req: Request,
@@ -77,14 +84,20 @@ export class UsersController {
     @Body()
     body: Partial<{
       email: string;
-      username: string; // ✅ añadido para sincronizar con Keycloak
+      username: string;
       role: Role;
-      etapa: string;
-      manzana: string;
-      villa: string;
+
+      // nuevos
+      firstName: string | null;
+      lastName: string | null;
+      cedula: string | null;
+      etapa: string | null;
+      manzana: string | null;
+      villa: string | null;
+
       alicuota: boolean;
       urbanizationId: string;
-      // ❌ sessionLimit removido del DTO general
+      // sessionLimit se maneja en endpoint dedicado
     }>,
     @Req() req: Request,
   ) {
@@ -92,7 +105,7 @@ export class UsersController {
     return this.svc.update(id, body, user);
   }
 
-  // 🚀 NUEVO ENDPOINT: solo SUPERADMIN puede cambiar sessionLimit
+  // 🔒 Solo SUPERADMIN puede cambiar sessionLimit
   @Put(':id/session-limit')
   @Roles(Role.SUPERADMIN)
   updateSessionLimit(
@@ -113,14 +126,14 @@ export class UsersController {
     return this.svc.remove(id, user);
   }
 
-  // 🔥 Listar sesiones activas de un usuario (solo SUPERADMIN/ADMIN)
+  // 🔥 Listar sesiones activas de un usuario (SUPERADMIN/ADMIN)
   @Get(':id/sessions')
   @Roles(Role.SUPERADMIN, Role.ADMIN)
   listSessions(@Param('id') id: string) {
     return this.svc.listSessions(id);
   }
 
-  // 🔥 Cerrar sesión remota (solo SUPERADMIN/ADMIN)
+  // 🔥 Cerrar sesión remota (SUPERADMIN/ADMIN)
   @Delete(':id/sessions/:sessionId')
   @Roles(Role.SUPERADMIN, Role.ADMIN)
   terminateSession(
@@ -152,7 +165,7 @@ export class UsersController {
     });
   }
 
-  // 🚀 BULK DELETE USERS
+  // 🚀 BULK DELETE USERS (POST para subir archivo)
   @Post('bulk/delete')
   @Roles(Role.SUPERADMIN, Role.ADMIN)
   @UseInterceptors(FileInterceptor('file'))
@@ -167,7 +180,7 @@ export class UsersController {
     return this.svc.bulkDeleteUsers(file.buffer, user);
   }
 
-  // 🚀 TEMPLATE USERS
+  // 📄 TEMPLATE USERS (envío binario explícito para evitar corrupción)
   @Get('bulk/template')
   @Roles(Role.SUPERADMIN, Role.ADMIN)
   @Header(
@@ -175,7 +188,17 @@ export class UsersController {
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   )
   @Header('Content-Disposition', 'attachment; filename="users_template.xlsx"')
-  async usersTemplate() {
-    return this.svc.buildUsersTemplate();
+  async usersTemplate(@Res() res: Response) {
+    const buffer = await this.svc.buildUsersTemplate();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="users_template.xlsx"',
+    );
+    res.setHeader('Content-Length', buffer.length.toString());
+    res.end(buffer);
   }
 }

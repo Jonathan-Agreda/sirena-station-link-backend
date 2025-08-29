@@ -64,6 +64,11 @@ model User {
   username       String?  @unique
   role           Role
 
+  // NUEVO
+  firstName      String?   // Nombre
+  lastName       String?   // Apellido
+  cedula         String?   @unique  @db.VarChar(32) // única si viene; múltiples NULL permitidos
+  
   /// Override de sesiones concurrentes permitidas.
   /// Si es NULL, el backend aplica la política por rol:
   /// SUPERADMIN=3, ADMIN/GUARDIA/RESIDENTE=1

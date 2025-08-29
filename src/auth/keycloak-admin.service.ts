@@ -22,6 +22,15 @@ type TokenResponse = {
 
 type RoleRepresentation = { id: string; name: string };
 
+// 👇 Tipo único para updates de usuario (ahora incluye firstName/lastName)
+type KCUserUpdate = {
+  username?: string;
+  email?: string;
+  enabled?: boolean;
+  firstName?: string;
+  lastName?: string;
+};
+
 @Injectable()
 export class KeycloakAdminService {
   private readonly logger = new Logger(KeycloakAdminService.name);
@@ -234,16 +243,18 @@ export class KeycloakAdminService {
     }
   }
 
-  // 🧩 Actualizar perfil (username/email/enabled)
+  // 🧩 Actualizar perfil (username/email/enabled/firstName/lastName)
   async updateUserProfile(
     userId: string,
-    data: { username?: string; email?: string; enabled?: boolean },
+    data: KCUserUpdate,
   ): Promise<boolean> {
     const http = await this.client();
     const body: Record<string, unknown> = {};
     if (data.username !== undefined) body.username = data.username;
     if (data.email !== undefined) body.email = data.email;
     if (data.enabled !== undefined) body.enabled = data.enabled;
+    if (data.firstName !== undefined) body.firstName = data.firstName;
+    if (data.lastName !== undefined) body.lastName = data.lastName;
 
     if (Object.keys(body).length === 0) return true; // nada que actualizar
 

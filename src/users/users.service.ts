@@ -10,6 +10,7 @@ import { KeycloakAdminService } from '../auth/keycloak-admin.service';
 import * as ExcelJS from 'exceljs';
 
 type BulkOptions = { dryRun?: boolean; provisionKeycloak?: boolean };
+
 function normalizeKey(s?: string) {
   return (s || '').toString().trim().toLowerCase().replace(/\s+/g, '');
 }
@@ -55,16 +56,22 @@ export class UsersService {
     throw new ForbiddenException('You cannot view this user');
   }
 
-  // 📌 Crear usuario (sincroniza Keycloak)
+  // 📌 Crear usuario (sincroniza con Keycloak nombre/apellido si se proveen)
   async create(
     data: {
       username: string;
       email: string;
       role: Role;
       urbanizationId?: string;
-      etapa?: string;
-      manzana?: string;
-      villa?: string;
+
+      // nuevos campos
+      firstName?: string | null;
+      lastName?: string | null;
+      cedula?: string | null;
+      etapa?: string | null;
+      manzana?: string | null;
+      villa?: string | null;
+
       alicuota?: boolean;
     },
     requestingUser: any,
@@ -89,6 +96,17 @@ export class UsersService {
       }
     }
 
+    // unicidad por cédula (si llega)
+    if (data.cedula) {
+      const byCed = await this.prisma.user.findFirst({
+        where: { cedula: data.cedula },
+      });
+      if (byCed)
+        throw new BadRequestException(
+          `La cédula ${data.cedula} ya está registrada`,
+        );
+    }
+
     // Crear en Keycloak
     const { id: keycloakId } = await this.kcAdmin.createUser({
       username: data.username,
@@ -97,22 +115,46 @@ export class UsersService {
       temporaryPassword: process.env.USER_DEFAULT_PASSWORD || 'changeme123',
     });
 
+    // Si proveíste nombres, sincronízalos después de crear
+    if (data.firstName || data.lastName) {
+      await this.kcAdmin.updateUserProfile(keycloakId, {
+        ...(data.firstName ? { firstName: data.firstName } : {}),
+        ...(data.lastName ? { lastName: data.lastName } : {}),
+      });
+    }
+
     // Guardar en BD
     return this.prisma.user.create({
-      data: { ...data, keycloakId, sessionLimit: null },
+      data: {
+        ...data,
+        keycloakId,
+        sessionLimit: null,
+        firstName: data.firstName ?? null,
+        lastName: data.lastName ?? null,
+        cedula: data.cedula ?? null,
+        etapa: data.etapa ?? null,
+        manzana: data.manzana ?? null,
+        villa: data.villa ?? null,
+      },
     });
   }
 
-  // 📌 Actualizar usuario (sincroniza email/username/role en Keycloak)
+  // 📌 Actualizar usuario (sincroniza email/username/role/nombres en Keycloak)
   async update(
     id: string,
     data: Partial<{
       email: string;
       username: string;
       role: Role;
-      etapa: string;
-      manzana: string;
-      villa: string;
+
+      // nuevos campos
+      firstName: string | null;
+      lastName: string | null;
+      cedula: string | null;
+      etapa: string | null;
+      manzana: string | null;
+      villa: string | null;
+
       alicuota: boolean;
       urbanizationId: string;
       sessionLimit: number | null;
@@ -139,7 +181,7 @@ export class UsersService {
       }
     }
 
-    // 🔒 Solo SUPERADMIN puede modificar sessionLimit (defensivo)
+    // 🔒 SUPERADMIN-only (defensivo)
     if (
       data.sessionLimit !== undefined &&
       !requestingUser.roles.includes(Role.SUPERADMIN)
@@ -147,13 +189,37 @@ export class UsersService {
       delete data.sessionLimit;
     }
 
+    // unicidad por cédula al actualizar
+    if (data.cedula !== undefined && data.cedula !== user.cedula) {
+      if (data.cedula) {
+        const byCed = await this.prisma.user.findFirst({
+          where: { cedula: data.cedula, id: { not: id } },
+        });
+        if (byCed)
+          throw new BadRequestException(
+            `La cédula ${data.cedula} ya está registrada`,
+          );
+      }
+    }
+
     // 🔄 Sincronizar con Keycloak (si el usuario tiene keycloakId)
     if (user.keycloakId) {
-      // Email y/o username
-      if (data.email || data.username) {
+      // Email, username, firstName, lastName
+      if (
+        data.email ||
+        data.username ||
+        data.firstName !== undefined ||
+        data.lastName !== undefined
+      ) {
         await this.kcAdmin.updateUserProfile(user.keycloakId, {
           ...(data.email ? { email: data.email } : {}),
           ...(data.username ? { username: data.username } : {}),
+          ...(data.firstName !== undefined
+            ? { firstName: data.firstName ?? '' }
+            : {}),
+          ...(data.lastName !== undefined
+            ? { lastName: data.lastName ?? '' }
+            : {}),
         });
       }
       // Rol
@@ -163,7 +229,18 @@ export class UsersService {
     }
 
     // ✅ Persistir cambios en BD
-    return this.prisma.user.update({ where: { id }, data });
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        ...data,
+        firstName: data.firstName ?? user.firstName ?? null,
+        lastName: data.lastName ?? user.lastName ?? null,
+        cedula: data.cedula ?? user.cedula ?? null,
+        etapa: data.etapa ?? user.etapa ?? null,
+        manzana: data.manzana ?? user.manzana ?? null,
+        villa: data.villa ?? user.villa ?? null,
+      },
+    });
   }
 
   // 📌 Eliminar usuario (borra Keycloak y BD)
@@ -184,7 +261,6 @@ export class UsersService {
       try {
         await this.kcAdmin.deleteUser(user.keycloakId);
       } catch (e) {
-        // No abortamos; dejamos registro si tu kcAdmin expone logger
         this.kcAdmin['logger']?.warn?.(
           `Failed to delete user in Keycloak: ${user.keycloakId}`,
         );
@@ -227,7 +303,13 @@ export class UsersService {
     const rows: Record<string, any>[] = [];
     for (let r = 2; r <= sheet.rowCount; r++) {
       const row = sheet.getRow(r);
-      if (row.getCell(1).value == null) continue;
+
+      // considerar vacía solo si TODAS las celdas de la fila están vacías
+      const allEmpty = [...Array(headerRow.cellCount).keys()].every(
+        (i) => row.getCell(i + 1).value == null,
+      );
+      if (allEmpty) continue;
+
       const obj: Record<string, any> = {};
       for (let c = 1; c <= headerRow.cellCount; c++) {
         const key = headers[c];
@@ -255,7 +337,8 @@ export class UsersService {
     if (!(isSuper || isAdmin)) throw new ForbiddenException('Forbidden');
 
     let toCreate = 0,
-      toUpdate = 0;
+      toUpdate = 0,
+      skipped = 0;
     const report: any[] = [];
     const defaultPass = process.env.USER_DEFAULT_PASSWORD || 'changeme123';
 
@@ -268,27 +351,60 @@ export class UsersService {
       const username = (String(raw['username'] ?? '').trim() || null) as
         | string
         | null;
+
       const roleStr = String(raw['role'] ?? '')
         .trim()
         .toUpperCase();
-      const urbName = String(raw['urbanization'] ?? '').trim();
-      const urbIdFromFile = String(raw['urbanizationid'] ?? '').trim();
-
-      if (!email || !(roleStr in Role)) {
-        report.push({ email, status: 'error', error: 'invalid email/role' });
+      if (!(roleStr in Role)) {
+        report.push({
+          key: email || username,
+          status: 'error',
+          error: 'invalid role',
+        });
+        skipped++;
         continue;
       }
       const role = roleStr as Role;
+
+      const urbName = String(raw['urbanization'] ?? '').trim();
+      const urbIdFromFile = String(raw['urbanizationid'] ?? '').trim();
+
+      // nuevos campos en bulk
+      const firstName = (String(
+        raw['firstname'] ?? raw['nombre'] ?? '',
+      ).trim() || null) as string | null;
+      const lastName = (String(
+        raw['lastname'] ?? raw['apellido'] ?? '',
+      ).trim() || null) as string | null;
+      const cedula = (String(raw['cedula'] ?? '').trim() || null) as
+        | string
+        | null;
+      const etapa = (String(raw['etapa'] ?? '').trim() || null) as
+        | string
+        | null;
+      const manzana = (String(raw['manzana'] ?? '').trim() || null) as
+        | string
+        | null;
+      const villa = (String(raw['villa'] ?? '').trim() || null) as
+        | string
+        | null;
+
+      if (!email && !username) {
+        report.push({ status: 'error', error: 'email or username required' });
+        skipped++;
+        continue;
+      }
 
       // Resolver urbanizationId
       let urbanizationId: string | null = null;
       if (isAdmin) {
         if (role === Role.SUPERADMIN || role === Role.ADMIN) {
           report.push({
-            email,
+            key: email || username,
             status: 'error',
             error: 'ADMIN cannot assign ADMIN/SUPERADMIN',
           });
+          skipped++;
           continue;
         }
         urbanizationId = adminUrbId;
@@ -299,10 +415,11 @@ export class UsersService {
           });
           if (!exists) {
             report.push({
-              email,
+              key: email || username,
               status: 'error',
               error: `urbanizationId not found: ${urbIdFromFile}`,
             });
+            skipped++;
             continue;
           }
           urbanizationId = urbIdFromFile;
@@ -312,17 +429,42 @@ export class UsersService {
           });
           if (!exists) {
             report.push({
-              email,
+              key: email || username,
               status: 'error',
               error: `urbanization name not found: ${urbName}`,
             });
+            skipped++;
             continue;
           }
           urbanizationId = exists.id;
         }
       }
 
-      const existing = await this.prisma.user.findFirst({ where: { email } });
+      // Buscar usuario por email o username
+      const existing = await this.prisma.user.findFirst({
+        where: {
+          OR: [
+            ...(email ? [{ email }] : []),
+            ...(username ? [{ username }] : []),
+          ],
+        },
+      });
+
+      // Validación de cédula única
+      if (cedula) {
+        const holder = await this.prisma.user.findFirst({
+          where: existing ? { cedula, id: { not: existing.id } } : { cedula },
+        });
+        if (holder) {
+          report.push({
+            key: email || username,
+            status: 'error',
+            error: 'Cédula ya registrada',
+          });
+          skipped++;
+          continue;
+        }
+      }
 
       // CREATE
       if (!existing) {
@@ -333,22 +475,57 @@ export class UsersService {
           if (provisionKeycloak) {
             const kc = await this.kcAdmin.createUser({
               username: username || email,
-              email,
+              email: email || username!, // fallback si solo vino username
               role,
               temporaryPassword: defaultPass,
             });
             keycloakId = kc.id;
+
+            if (firstName || lastName) {
+              await this.kcAdmin.updateUserProfile(kc.id, {
+                ...(firstName ? { firstName } : {}),
+                ...(lastName ? { lastName } : {}),
+              });
+            }
           }
 
           await this.prisma.user.create({
-            data: { email, username, role, urbanizationId, keycloakId },
+            data: {
+              email: email || `${username}@placeholder.local`,
+              username,
+              role,
+              urbanizationId,
+              keycloakId,
+              firstName,
+              lastName,
+              cedula,
+              etapa,
+              manzana,
+              villa,
+            },
           });
         }
-        report.push({ email, status: dryRun ? 'would_create' : 'created' });
+        report.push({
+          key: email || username,
+          status: dryRun ? 'would_create' : 'created',
+        });
         continue;
       }
 
       // UPDATE
+      if (
+        isAdmin &&
+        existing.urbanizationId !== requestingUser.urbanizationId
+      ) {
+        report.push({
+          key: email || username,
+          status: 'forbidden',
+          error: 'Usuario fuera de tu urbanización',
+        });
+        skipped++;
+        continue;
+      }
+
       toUpdate++;
       if (!dryRun) {
         // Sincronizar con KC si corresponde
@@ -356,8 +533,9 @@ export class UsersService {
           // Si no tiene KC y se pide provision, créalo y enlaza
           if (!existing.keycloakId) {
             const kc = await this.kcAdmin.createUser({
-              username: username || existing.username || email,
-              email,
+              username:
+                username || existing.username || email || existing.email,
+              email: email || existing.email,
               role,
               temporaryPassword: defaultPass,
             });
@@ -365,19 +543,28 @@ export class UsersService {
               where: { id: existing.id },
               data: { keycloakId: kc.id },
             });
+            if (firstName || lastName) {
+              await this.kcAdmin.updateUserProfile(kc.id, {
+                ...(firstName ? { firstName } : {}),
+                ...(lastName ? { lastName } : {}),
+              });
+            }
             existing.keycloakId = kc.id;
           } else {
-            // Actualizar perfil (email/username)
-            if (
-              (username && username !== existing.username) ||
-              email !== existing.email
-            ) {
-              await this.kcAdmin.updateUserProfile(existing.keycloakId, {
-                ...(email !== existing.email ? { email } : {}),
-                ...(username && username !== existing.username
-                  ? { username }
-                  : {}),
-              });
+            // Actualizar perfil (email/username/firstName/lastName)
+            const updateProfile: any = {};
+            if (email && email !== existing.email) updateProfile.email = email;
+            if (username && username !== existing.username)
+              updateProfile.username = username;
+            if (firstName !== null && firstName !== undefined)
+              updateProfile.firstName = firstName;
+            if (lastName !== null && lastName !== undefined)
+              updateProfile.lastName = lastName;
+            if (Object.keys(updateProfile).length > 0) {
+              await this.kcAdmin.updateUserProfile(
+                existing.keycloakId,
+                updateProfile,
+              );
             }
             // Cambiar rol si difiere
             if (role !== existing.role) {
@@ -388,13 +575,34 @@ export class UsersService {
 
         await this.prisma.user.update({
           where: { id: existing.id },
-          data: { username, role, urbanizationId },
+          data: {
+            username,
+            role,
+            urbanizationId,
+            firstName,
+            lastName,
+            cedula,
+            etapa,
+            manzana,
+            villa,
+            ...(email ? { email } : {}),
+          },
         });
       }
-      report.push({ email, status: dryRun ? 'would_update' : 'updated' });
+      report.push({
+        key: email || username,
+        status: dryRun ? 'would_update' : 'updated',
+      });
     }
 
-    return { dryRun, toCreate, toUpdate, processed: rows.length, report };
+    return {
+      dryRun,
+      toCreate,
+      toUpdate,
+      skipped,
+      processed: rows.length,
+      report,
+    };
   }
 
   // 🚀 BULK DELETE (elimina en Keycloak y BD)
@@ -457,9 +665,47 @@ export class UsersService {
   async buildUsersTemplate(): Promise<Buffer> {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('users');
-    ws.addRow(['email', 'username', 'role', 'urbanization', 'urbanizationId']);
-    ws.addRow(['jane@example.com', 'jane', 'RESIDENTE', 'Mi Urb', '']);
-    ws.addRow(['admin@urb.com', 'admin01', 'ADMIN', 'Mi Urb', '']);
+
+    ws.addRow([
+      'email',
+      'username',
+      'role',
+      'urbanization',
+      'urbanizationId',
+      'firstName',
+      'lastName',
+      'cedula',
+      'etapa',
+      'manzana',
+      'villa',
+    ]);
+    ws.addRow([
+      'jona@example.com',
+      'jona',
+      'ADMIN',
+      'Lomas del Bosque',
+      '',
+      'Jonathan',
+      'Agreda',
+      '0102030405',
+      '1',
+      'B',
+      '12',
+    ]);
+    ws.addRow([
+      'jmurillo@example.com',
+      'jmurillo',
+      'GUARDIA',
+      'Lomas del Bosque',
+      '',
+      'Juan',
+      'Murillo',
+      '',
+      '',
+      '',
+      '',
+    ]);
+
     const buf = await wb.xlsx.writeBuffer();
     return Buffer.from(buf as ArrayBuffer);
   }
