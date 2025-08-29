@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SirenaStationLink - Monitor WS</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f5f6fa;
+        margin: 20px;
+      }
+      h1 {
+        text-align: center;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-top: 20px;
+        background: #fff;
+      }
+      th,
+      td {
+        border: 1px solid #ccc;
+        padding: 6px 10px;
+        text-align: center;
+      }
+      th {
+        background: #2f3640;
+        color: #fff;
+      }
+      .online {
+        color: green;
+        font-weight: bold;
+      }
+      .offline {
+        color: red;
+        font-weight: bold;
+      }
+      .relay-on {
+        background: #27ae60;
+        color: #fff;
+      }
+      .relay-off {
+        background: #c0392b;
+        color: #fff;
+      }
+      button {
+        padding: 4px 8px;
+        margin: 2px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .btn-on {
+        background: #27ae60;
+        color: #fff;
+      }
+      .btn-off {
+        background: #c0392b;
+        color: #fff;
+      }
+      input.ttl {
+        width: 60px;
+        text-align: right;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🚨 SirenaStationLink - Monitor de Sirenas</h1>
+    <table id="sirens-table">
+      <thead>
+        <tr>
+          <th>DeviceId</th>
+          <th>IP</th>
+          <th>Online</th>
+          <th>Relay</th>
+          <th>Siren</th>
+          <th>Último estado</th>
+          <th>Último heartbeat</th>
+          <th>TTL (seg)</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <script>
+      const WS_URL = 'http://localhost:4000/ws'; // WebSocket backend
+      const API_URL = 'http://localhost:4000/api'; // REST backend
+
+      const socket = io(WS_URL, { transports: ['websocket'] });
+      const sirens = {};
+
+      async function sendCommand(deviceId, action) {
+        const ttlInput = document.querySelector(`#ttl-${deviceId}`);
+        const ttlSec = parseInt(ttlInput?.value || '0', 10);
+
+        try {
+          const res = await fetch(`${API_URL}/devices/${deviceId}/cmd`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              // ⚠️ Si usas auth real: agrega Authorization: Bearer <token>
+            },
+            body: JSON.stringify({
+              action,
+              ttlMs: ttlSec > 0 ? ttlSec * 1000 : 0,
+            }),
+          });
+
+          if (!res.ok) {
+            const err = await res.json();
+            alert(`❌ Error: ${err.message || res.status}`);
+            return;
+          }
+
+          const data = await res.json();
+          console.log('✅ Respuesta backend:', data);
+          alert(data.message);
+        } catch (err) {
+          console.error('❌ Error fetch:', err);
+          alert('Error de red al enviar comando');
+        }
+      }
+
+      function render() {
+        const tbody = document.querySelector('#sirens-table tbody');
+        tbody.innerHTML = '';
+        Object.values(sirens).forEach((s) => {
+          const tr = document.createElement('tr');
+
+          const tdId = document.createElement('td');
+          tdId.textContent = s.deviceId;
+          const tdIp = document.createElement('td');
+          tdIp.textContent = s.ip || '-';
+          const tdOnline = document.createElement('td');
+          tdOnline.textContent = s.online ? '🟢' : '🔴';
+          tdOnline.className = s.online ? 'online' : 'offline';
+          const tdRelay = document.createElement('td');
+          tdRelay.textContent = s.relay || '-';
+          tdRelay.className = s.relay === 'ON' ? 'relay-on' : 'relay-off';
+          const tdSiren = document.createElement('td');
+          tdSiren.textContent = s.siren || '-';
+          tdSiren.className = s.siren === 'ON' ? 'relay-on' : 'relay-off';
+          const tdUpdated = document.createElement('td');
+          tdUpdated.textContent = s.updatedAt
+            ? new Date(s.updatedAt).toLocaleTimeString()
+            : '-';
+          const tdHb = document.createElement('td');
+          tdHb.textContent = s.lastHeartbeatAt
+            ? new Date(s.lastHeartbeatAt).toLocaleTimeString()
+            : '-';
+
+          const tdTtl = document.createElement('td');
+          tdTtl.innerHTML = `<input id="ttl-${s.deviceId}" class="ttl" type="number" min="0" value="0">`;
+
+          const tdActions = document.createElement('td');
+          tdActions.innerHTML = `
+            <button class="btn-on" onclick="sendCommand('${s.deviceId}', 'ON')">ON</button>
+            <button class="btn-off" onclick="sendCommand('${s.deviceId}', 'OFF')">OFF</button>
+          `;
+
+          [
+            tdId,
+            tdIp,
+            tdOnline,
+            tdRelay,
+            tdSiren,
+            tdUpdated,
+            tdHb,
+            tdTtl,
+            tdActions,
+          ].forEach((td) => tr.appendChild(td));
+          tbody.appendChild(tr);
+        });
+      }
+
+      socket.on('connect', () => console.log('✅ Conectado al WS:', socket.id));
+
+      socket.on('device.state', (data) => {
+        sirens[data.deviceId] = { ...sirens[data.deviceId], ...data };
+        render();
+      });
+      socket.on('device.heartbeat', (data) => {
+        if (sirens[data.deviceId]) {
+          sirens[data.deviceId].lastHeartbeatAt =
+            data.lastHeartbeatAt || data.ts;
+          render();
+        }
+      });
+      socket.on('device.lwt', (data) => {
+        sirens[data.deviceId] = {
+          ...sirens[data.deviceId],
+          ...data,
+          online: false,
+        };
+        render();
+      });
+      socket.on('device.ack', (data) => {
+        console.log('✅ ACK recibido:', data);
+        alert(`ACK ${data.deviceId}: ${data.result} (${data.action})`);
+      });
+    </script>
+  </body>
+</html>

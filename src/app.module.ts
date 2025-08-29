@@ -15,6 +15,7 @@ import { SirensModule } from './sirens/sirens.module';
 import { GroupsModule } from './groups/groups.module';
 import { ActivationLogsModule } from './activation-logs/activation-logs.module';
 import { AssignmentsModule } from './assignments/assignments.module'; // 👈 importar módulo
+import { ResidentsModule } from './residents/residents.module';
 
 @Module({
   imports: [
@@ -33,7 +34,8 @@ import { AssignmentsModule } from './assignments/assignments.module'; // 👈 im
     SirensModule,
     GroupsModule,
     ActivationLogsModule,
-    AssignmentsModule, // 👈 registrar aquí
+    AssignmentsModule,
+    ResidentsModule, // 👈 registrar aquí
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
