@@ -12,7 +12,7 @@ export class ResidentsController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get('me')
-  @Roles(Role.RESIDENTE)
+  @Roles(Role.RESIDENTE, Role.ADMIN, Role.GUARDIA, Role.SUPERADMIN)
   async me(@Req() req: Request) {
     const sub = req.user?.sub as string; // UUID de Keycloak
 
