@@ -31,7 +31,8 @@ export class ResidentsController {
 
     if (!user) return { error: 'Usuario no encontrado' };
 
-    const siren = user.assignments[0]?.siren ?? null;
+    // 🔹 Convertir assignments → array de sirens
+    const sirens = user.assignments.map((a) => a.siren);
 
     return {
       id: user.id,
@@ -45,7 +46,7 @@ export class ResidentsController {
       villa: user.villa,
       alicuota: user.alicuota,
       urbanizacion: user.urbanization,
-      siren,
+      sirens, // 🔹 ahora es un array
     };
   }
 }
