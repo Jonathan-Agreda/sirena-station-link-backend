@@ -6,9 +6,11 @@ import { SessionLimitService } from './session-limit.service';
 import { AuditService } from './audit.service';
 import { AuthGuard } from './auth.guard';
 import { RolesGuard } from './roles.guard';
+import { FirstLoginController } from './first-login.controller';
+import { FirstLoginService } from './first-login.service';
 
 @Module({
-  controllers: [AuthController],
+  controllers: [AuthController, FirstLoginController],
   providers: [
     OidcService,
     KeycloakAdminService,
@@ -16,6 +18,7 @@ import { RolesGuard } from './roles.guard';
     AuditService,
     AuthGuard, // ✅ añadimos AuthGuard
     RolesGuard, // ✅ añadimos RolesGuard
+    FirstLoginService, // ✅ añadimos FirstLoginService
   ],
   exports: [
     OidcService,
