@@ -68,6 +68,7 @@ export class UsersService {
       firstName?: string | null;
       lastName?: string | null;
       cedula?: string | null;
+      celular?: string | null;
       etapa?: string | null;
       manzana?: string | null;
       villa?: string | null;
@@ -132,6 +133,7 @@ export class UsersService {
         firstName: data.firstName ?? null,
         lastName: data.lastName ?? null,
         cedula: data.cedula ?? null,
+        celular: data.celular ?? null,
         etapa: data.etapa ?? null,
         manzana: data.manzana ?? null,
         villa: data.villa ?? null,
@@ -151,6 +153,7 @@ export class UsersService {
       firstName: string | null;
       lastName: string | null;
       cedula: string | null;
+      celular: string | null;
       etapa: string | null;
       manzana: string | null;
       villa: string | null;
@@ -236,6 +239,7 @@ export class UsersService {
         firstName: data.firstName ?? user.firstName ?? null,
         lastName: data.lastName ?? user.lastName ?? null,
         cedula: data.cedula ?? user.cedula ?? null,
+        celular: data.celular ?? user.celular ?? null,
         etapa: data.etapa ?? user.etapa ?? null,
         manzana: data.manzana ?? user.manzana ?? null,
         villa: data.villa ?? user.villa ?? null,
@@ -379,6 +383,9 @@ export class UsersService {
       const cedula = (String(raw['cedula'] ?? '').trim() || null) as
         | string
         | null;
+      const celular = (String(raw['celular'] ?? '').trim() || null) as
+        | string
+        | null;
       const etapa = (String(raw['etapa'] ?? '').trim() || null) as
         | string
         | null;
@@ -499,6 +506,7 @@ export class UsersService {
               firstName,
               lastName,
               cedula,
+              celular,
               etapa,
               manzana,
               villa,
@@ -582,6 +590,7 @@ export class UsersService {
             firstName,
             lastName,
             cedula,
+            celular,
             etapa,
             manzana,
             villa,
@@ -675,6 +684,7 @@ export class UsersService {
       'firstName',
       'lastName',
       'cedula',
+      'celular',
       'etapa',
       'manzana',
       'villa',
@@ -688,6 +698,7 @@ export class UsersService {
       'Jonathan',
       'Agreda',
       '0102030405',
+      '0999999999',
       '1',
       'B',
       '12',

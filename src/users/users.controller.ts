@@ -62,6 +62,7 @@ export class UsersController {
       firstName?: string | null;
       lastName?: string | null;
       cedula?: string | null;
+      celular?: string | null;
       etapa?: string | null;
       manzana?: string | null;
       villa?: string | null;
@@ -91,6 +92,7 @@ export class UsersController {
       firstName: string | null;
       lastName: string | null;
       cedula: string | null;
+      celular: string | null;
       etapa: string | null;
       manzana: string | null;
       villa: string | null;
