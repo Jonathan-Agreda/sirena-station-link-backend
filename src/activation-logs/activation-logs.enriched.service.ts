@@ -66,6 +66,8 @@ export class ActivationLogsEnrichedService {
               etapa: true,
               manzana: true,
               villa: true,
+              cedula: true,
+              celular: true,
             },
           },
         },
@@ -83,6 +85,8 @@ export class ActivationLogsEnrichedService {
             etapa: r.user.etapa ?? null,
             manzana: r.user.manzana ?? null,
             villa: r.user.villa ?? null,
+            cedula: r.user.cedula ?? null,
+            celular: r.user.celular ?? null,
           }
         : {
             id: null,
@@ -91,6 +95,8 @@ export class ActivationLogsEnrichedService {
             etapa: null,
             manzana: null,
             villa: null,
+            cedula: null,
+            celular: null,
           };
 
       return {
