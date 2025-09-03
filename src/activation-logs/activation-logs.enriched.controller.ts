@@ -13,7 +13,7 @@ export class ActivationLogsEnrichedController {
   constructor(private readonly service: ActivationLogsEnrichedService) {}
 
   @Get('enriched')
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA')
   async getEnriched(@Req() req: Request, @Query() query: EnrichedLogsQueryDto) {
     return this.service.findEnriched(req, query);
   }

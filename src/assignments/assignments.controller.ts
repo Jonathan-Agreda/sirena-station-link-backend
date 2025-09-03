@@ -31,7 +31,7 @@ export class AssignmentsController {
 
   // ✅ Crear asignación individual
   @Post()
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   async assign(
     @Body() body: { userId: string; sirenId: string },
     @Req() req: Request,
@@ -39,7 +39,7 @@ export class AssignmentsController {
     const currentUser = req['user'] as AuthUser;
     if (!currentUser) throw new ForbiddenException('No authenticated user');
 
-    if (currentUser.roles.includes(Role.ADMIN) && !currentUser.urbanizationId) {
+    if (currentUser.roles.includes('ADMIN') && !currentUser.urbanizationId) {
       throw new ForbiddenException('Admin sin urbanización asignada');
     }
 
@@ -48,14 +48,14 @@ export class AssignmentsController {
 
   // ✅ Remover asignación individual
   @Delete(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   async unassign(@Param('id') id: string) {
     return this.svc.unassign(id);
   }
 
   // 🔎 Listar asignaciones por usuario
   @Get('user/:userId')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   async findByUser(@Param('userId') userId: string, @Req() req: Request) {
     const currentUser = req['user'] as AuthUser;
     if (!currentUser) throw new ForbiddenException('No authenticated user');
@@ -64,7 +64,7 @@ export class AssignmentsController {
 
   // 🔎 Listar asignaciones por sirena
   @Get('siren/:sirenId')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   async findBySiren(@Param('sirenId') sirenId: string, @Req() req: Request) {
     const currentUser = req['user'] as AuthUser;
     if (!currentUser) throw new ForbiddenException('No authenticated user');
@@ -73,7 +73,7 @@ export class AssignmentsController {
 
   // 🚀 BULK IMPORT (Excel: userId|email|username, sirenId|deviceId, active)
   @Post('bulk/import')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async bulkImportAssignments(
     @UploadedFile() file: Express.Multer.File,
@@ -94,7 +94,7 @@ export class AssignmentsController {
 
   // 🚀 BULK DELETE (Excel: userId|email|username, sirenId|deviceId)
   @Post('bulk/delete')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async bulkDeleteAssignments(
     @UploadedFile() file: Express.Multer.File,
@@ -111,7 +111,7 @@ export class AssignmentsController {
 
   // 📄 TEMPLATE (Excel de ejemplo para bulk)
   @Get('bulk/template')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @Header(
     'Content-Type',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

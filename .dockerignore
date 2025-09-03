@@ -1,0 +1,15 @@
+# Archivo .dockerignore
+
+# Ignorar dependencias, ya que se instalarán dentro del contenedor
+node_modules
+
+# Ignorar la carpeta de código compilado (si existe localmente)
+dist
+
+# Ignorar archivos de Git
+.git
+.gitignore
+
+# Ignorar variables de entorno locales y logs
+.env
+npm-debug.log

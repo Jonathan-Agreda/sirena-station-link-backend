@@ -29,7 +29,7 @@ export class UrbanizationsController {
 
   // ✅ Solo SUPERADMIN puede crear urbanizaciones
   @Post()
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   create(
     @Body()
     body: {
@@ -42,7 +42,7 @@ export class UrbanizationsController {
 
   // ✅ SUPERADMIN ve todas; otros solo la suya
   @Get()
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findAll(@Req() req: Request) {
     const user = req['user'];
     return this.svc.findAll(user);
@@ -50,7 +50,7 @@ export class UrbanizationsController {
 
   // ✅ SUPERADMIN puede ver cualquiera; otros solo la suya
   @Get(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findOne(@Param('id') id: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.findOne(id, user);
@@ -58,7 +58,7 @@ export class UrbanizationsController {
 
   // ✅ Solo SUPERADMIN puede actualizar
   @Put(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   update(
     @Param('id') id: string,
     @Body()
@@ -74,7 +74,7 @@ export class UrbanizationsController {
 
   // ✅ Solo SUPERADMIN puede eliminar
   @Delete(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   remove(@Param('id') id: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.remove(id, user);
@@ -82,7 +82,7 @@ export class UrbanizationsController {
 
   // 🚀 BULK IMPORT (Excel con columnas: name | maxUsers)
   @Post('bulk/import')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async bulkImportUrbanizations(
     @UploadedFile() file: Express.Multer.File,
@@ -101,7 +101,7 @@ export class UrbanizationsController {
 
   // 🚀 BULK DELETE (Excel con columna: name)
   @Post('bulk/delete')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async bulkDeleteUrbanizations(
     @UploadedFile() file: Express.Multer.File,
@@ -116,7 +116,7 @@ export class UrbanizationsController {
 
   // 🚀 TEMPLATE (descarga ejemplo .xlsx)
   @Get('bulk/template')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @Header(
     'Content-Type',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

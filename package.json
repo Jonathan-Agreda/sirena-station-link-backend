@@ -36,7 +36,7 @@
     "cookie-parser": "^1.4.7",
     "exceljs": "^4.4.0",
     "helmet": "^8.1.0",
-    "jose": "^6.0.13",
+    "jose": "^4.15.5",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^3.2.0",
     "mqtt": "^5.14.0",

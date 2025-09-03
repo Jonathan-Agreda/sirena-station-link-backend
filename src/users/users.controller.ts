@@ -30,7 +30,7 @@ export class UsersController {
 
   // SUPERADMIN → todos; ADMIN → solo su urbanización
   @Get()
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   findAll(@Req() req: Request) {
     const user = req['user'];
     return this.svc.findAll(user);
@@ -40,7 +40,7 @@ export class UsersController {
   // ADMIN solo usuarios de su urbanización;
   // GUARDIA/RESIDENTE solo su propio perfil
   @Get(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findOne(@Param('id') id: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.findOne(id, user);
@@ -49,7 +49,7 @@ export class UsersController {
   // SUPERADMIN → crear en cualquier urbanización
   // ADMIN → crear solo en su propia urbanización
   @Post()
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   create(
     @Body()
     body: {
@@ -79,7 +79,7 @@ export class UsersController {
   // ADMIN → actualizar solo dentro de su urbanización
   // (no puede tocar sessionLimit ni subir a ADMIN/SUPERADMIN)
   @Put(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   update(
     @Param('id') id: string,
     @Body()
@@ -109,7 +109,7 @@ export class UsersController {
 
   // 🔒 Solo SUPERADMIN puede cambiar sessionLimit
   @Put(':id/session-limit')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   updateSessionLimit(
     @Param('id') id: string,
     @Body() body: { sessionLimit: number | null },
@@ -122,7 +122,7 @@ export class UsersController {
   // SUPERADMIN → borrar cualquiera
   // ADMIN → solo dentro de su urbanización
   @Delete(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   remove(@Param('id') id: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.remove(id, user);
@@ -130,14 +130,14 @@ export class UsersController {
 
   // 🔥 Listar sesiones activas de un usuario (SUPERADMIN/ADMIN)
   @Get(':id/sessions')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   listSessions(@Param('id') id: string) {
     return this.svc.listSessions(id);
   }
 
   // 🔥 Cerrar sesión remota (SUPERADMIN/ADMIN)
   @Delete(':id/sessions/:sessionId')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   terminateSession(
     @Param('id') id: string,
     @Param('sessionId') sessionId: string,
@@ -147,7 +147,7 @@ export class UsersController {
 
   // 🚀 BULK IMPORT USERS
   @Post('bulk/import')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async bulkImportUsers(
     @UploadedFile() file: Express.Multer.File,
@@ -169,7 +169,7 @@ export class UsersController {
 
   // 🚀 BULK DELETE USERS (POST para subir archivo)
   @Post('bulk/delete')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async bulkDeleteUsers(
     @UploadedFile() file: Express.Multer.File,
@@ -184,7 +184,7 @@ export class UsersController {
 
   // 📄 TEMPLATE USERS (envío binario explícito para evitar corrupción)
   @Get('bulk/template')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @Header(
     'Content-Type',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

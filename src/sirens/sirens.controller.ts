@@ -31,21 +31,21 @@ export class SirensController {
   // ✅ ADMIN/GUARDIA → ver sirenas de su urbanización
   // ✅ RESIDENTE → ver sirenas asignadas
   @Get()
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findAll(@Req() req: Request) {
     const user = req['user'];
     return this.svc.findAll(user);
   }
 
   @Get(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findOne(@Param('id') id: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.findOne(id, user);
   }
 
   @Post()
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   create(
     @Body()
     body: {
@@ -60,7 +60,7 @@ export class SirensController {
   }
 
   @Put(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   update(
     @Param('id') id: string,
     @Body()
@@ -76,14 +76,14 @@ export class SirensController {
   }
 
   @Delete(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   remove(@Param('id') id: string) {
     return this.svc.remove(id);
   }
 
   // 🚀 BULK IMPORT (Excel: deviceId | apiKey | urbanizationId | lat | lng)
   @Post('bulk/import')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async bulkImportSirens(
     @UploadedFile() file: Express.Multer.File,
@@ -98,7 +98,7 @@ export class SirensController {
 
   // 🚀 BULK DELETE (Excel: deviceId)
   @Post('bulk/delete')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async bulkDeleteSirens(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
@@ -109,7 +109,7 @@ export class SirensController {
 
   // 🚀 TEMPLATE (Excel ejemplo)
   @Get('bulk/template')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @Header(
     'Content-Type',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

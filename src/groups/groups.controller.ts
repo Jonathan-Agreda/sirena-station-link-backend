@@ -23,7 +23,7 @@ export class GroupsController {
 
   // 🔎 Listar grupos
   @Get()
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findAll(@Req() req: Request) {
     const user = req['user'];
     return this.svc.findAll(user);
@@ -31,7 +31,7 @@ export class GroupsController {
 
   // 🔎 Obtener un grupo por ID
   @Get(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findOne(@Param('id') id: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.findOne(id, user);
@@ -39,7 +39,7 @@ export class GroupsController {
 
   // 🛠 Crear grupo
   @Post()
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   create(
     @Body() body: { name: string; urbanizationId: string },
     @Req() req: Request,
@@ -50,7 +50,7 @@ export class GroupsController {
 
   // 🛠 Editar grupo
   @Put(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   update(
     @Param('id') id: string,
     @Body() body: { name?: string },
@@ -62,7 +62,7 @@ export class GroupsController {
 
   // 🗑 Eliminar grupo
   @Delete(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   remove(@Param('id') id: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.remove(id, user);
@@ -70,7 +70,7 @@ export class GroupsController {
 
   // 📋 Listar sirenas de un grupo
   @Get(':id/sirens')
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   listSirens(@Param('id') id: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.listSirens(id, user);
@@ -78,7 +78,7 @@ export class GroupsController {
 
   // ➕ Mover sirena a un grupo
   @Put(':groupId/sirens/:sirenId')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   addSirenToGroup(
     @Param('groupId') groupId: string,
     @Param('sirenId') sirenId: string,
@@ -90,7 +90,7 @@ export class GroupsController {
 
   // ➖ Quitar sirena de un grupo
   @Delete('sirens/:sirenId')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   removeSirenFromGroup(@Param('sirenId') sirenId: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.removeSirenFromGroup(sirenId, user);

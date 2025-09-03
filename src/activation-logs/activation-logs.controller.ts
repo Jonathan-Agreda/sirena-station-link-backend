@@ -13,7 +13,7 @@ export class ActivationLogsController {
 
   // 🔎 SUPERADMIN ve todos
   @Get()
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findAll(@Req() req: Request) {
     const user = req['user'];
     return this.svc.findAll(user);
@@ -21,7 +21,7 @@ export class ActivationLogsController {
 
   // 🔎 Filtrar por sirena
   @Get('siren/:sirenId')
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.GUARDIA, Role.RESIDENTE)
+  @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findBySiren(@Param('sirenId') sirenId: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.findBySiren(sirenId, user);
@@ -29,7 +29,7 @@ export class ActivationLogsController {
 
   // 🔎 Filtrar por usuario
   @Get('user/:userId')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   findByUser(@Param('userId') userId: string, @Req() req: Request) {
     const user = req['user'];
     return this.svc.findByUser(userId, user);
