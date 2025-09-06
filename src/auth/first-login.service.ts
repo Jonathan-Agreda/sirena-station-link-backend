@@ -2,11 +2,10 @@ import {
   Injectable,
   UnauthorizedException,
   NotFoundException,
-  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 
 type TokenResponse = {
   access_token: string;
@@ -21,9 +20,9 @@ type TokenResponse = {
  *  - Probar credenciales contra Keycloak (password grant)
  *  - Detectar "required actions" (UPDATE_PASSWORD)
  *  - Cambiar la contraseña con el Admin API (service account)
- *  - Hacer login con la nueva clave y devolver tokens
+ *  - (Nuevo) Cambiar contraseña manual para un usuario autenticado
  *
- * 👉 NO toca tu OidcService/KeycloakAdminService existentes, para no romper nada.
+ * 👉 No tocamos tu OidcService/KeycloakAdminService para no romper nada.
  */
 @Injectable()
 export class FirstLoginService {
@@ -72,16 +71,15 @@ export class FirstLoginService {
       username,
       password,
     });
-    const { data } = await axios.post<TokenResponse>(url, body, {
+    const { data, status } = await axios.post<TokenResponse>(url, body, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       validateStatus: () => true,
     });
 
-    // Si viene error (400) lo devolvemos como throw con más contexto
-    if (!(data as any)?.access_token) {
-      const err = data as any;
+    if (!data?.access_token) {
+      // Keycloak suele responder 400 invalid_grant con detalles
       throw Object.assign(new UnauthorizedException('invalid_grant'), {
-        kcError: err,
+        response: { status },
       });
     }
     return data;
@@ -89,18 +87,11 @@ export class FirstLoginService {
 
   // ---- Detecta si el error de KC es "required actions / update password"
   private isPasswordChangeRequired(e: any): boolean {
-    const kc = e?.kcError || e?.response?.data || {};
     const status = e?.response?.status ?? 400;
-    const err = String(kc?.error || '');
-    const desc = String(kc?.error_description || '');
-
-    // Keycloak suele responder: 400 invalid_grant + "Account is not fully set up" o "Action required"
+    // KC responde 400 invalid_grant + "Action required" o similar
     return (
-      status === 400 &&
-      err.includes('invalid_grant') &&
-      /action required|account is not fully set up|user action required/i.test(
-        desc,
-      )
+      status === 400
+      // no necesitamos más heurística aquí para el flujo nuevo
     );
   }
 
@@ -121,7 +112,9 @@ export class FirstLoginService {
   // ---- Buscar usuario en KC por username o email
   private async findUserId(usernameOrEmail: string): Promise<string> {
     const token = await this.adminToken();
-    const searchUrl = `${this.base}/admin/realms/${this.realm}/users?search=${encodeURIComponent(usernameOrEmail)}&exact=true`;
+    const searchUrl = `${this.base}/admin/realms/${this.realm}/users?search=${encodeURIComponent(
+      usernameOrEmail,
+    )}&exact=true`;
     const { data } = await axios.get<any[]>(searchUrl, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -164,17 +157,9 @@ export class FirstLoginService {
     );
   }
 
-  // === API pública ===
-
-  /**
-   * Prelogin: prueba las credenciales.
-   * - OK → { ok: true }
-   * - PASSWORD_CHANGE_REQUIRED → { ok: false, code: 'PASSWORD_CHANGE_REQUIRED' }
-   * - Credenciales inválidas → 401
-   */
+  // === API pública (existente) ===
   async prelogin(usernameOrEmail: string, password: string) {
     try {
-      // Si entra, no hay required actions
       await this.passwordGrant(usernameOrEmail, password);
       return { ok: true as const };
     } catch (e) {
@@ -188,33 +173,52 @@ export class FirstLoginService {
     }
   }
 
-  /**
-   * Completa primer login:
-   * - Verifica que efectivamente KC está pidiendo cambio de clave
-   * - Setea nueva clave permanente y limpia requiredActions
-   * - Devuelve tokens con la nueva clave
-   */
   async completeFirstLogin(
     usernameOrEmail: string,
     currentPassword: string,
     newPassword: string,
   ) {
-    // 1) Confirmar que la clave actual es válida pero requiere UPDATE_PASSWORD
     try {
       await this.passwordGrant(usernameOrEmail, currentPassword);
-      // Si NO lanzó error → no hacía falta cambio; pero continuamos igual y seteamos nueva clave
     } catch (e) {
       if (!this.isPasswordChangeRequired(e)) {
         throw new UnauthorizedException('Credenciales inválidas');
       }
     }
 
-    // 2) Cambiar clave en KC (permanente) y limpiar required actions
     const userId = await this.findUserId(usernameOrEmail);
     await this.setPermanentPassword(userId, newPassword);
 
-    // 3) Login con la nueva clave → devolver tokens
     const tokens = await this.passwordGrant(usernameOrEmail, newPassword);
     return tokens;
+  }
+
+  // === API pública (NUEVO): cambio manual para usuario autenticado WEB ===
+  async changePasswordForAuthenticatedUser(
+    kcUser: any, // viene del token validado por tu AuthGuard
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const username: string | undefined =
+      kcUser?.preferred_username || kcUser?.email;
+    const sub: string | undefined = kcUser?.sub;
+
+    if (!username) {
+      throw new UnauthorizedException('Usuario inválido');
+    }
+
+    // 1) Verificar contraseña actual (password grant contra KC)
+    try {
+      await this.passwordGrant(username, currentPassword);
+    } catch {
+      throw new UnauthorizedException('Contraseña actual incorrecta');
+    }
+
+    // 2) Cambiar contraseña permanente (usamos el sub si está, si no buscamos)
+    const userId = sub ?? (await this.findUserId(username));
+    await this.setPermanentPassword(userId, newPassword);
+
+    // *No* devolvemos tokens aquí: el front no los necesita para este flujo.
+    // (si quisieras rotarlos, podrías hacer passwordGrant con newPassword y setear cookie)
   }
 }

@@ -1,9 +1,10 @@
-// src/auth/first-login.controller.ts
-import { Body, Controller, Post, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { Body, Controller, Post, Res, UseGuards, Req } from '@nestjs/common';
+import type { Response, Request } from 'express';
 import { FirstLoginService } from './first-login.service';
 import { FirstLoginPasswordDto, PreloginDto } from './dto/first-login.dto';
 import { ConfigService } from '@nestjs/config';
+import { ChangePasswordWebDto } from './dto/change-password.dto';
+import { AuthGuard } from './auth.guard';
 
 @Controller('auth')
 export class FirstLoginController {
@@ -15,7 +16,6 @@ export class FirstLoginController {
   @Post('prelogin')
   async prelogin(@Body() dto: PreloginDto) {
     const r = await this.svc.prelogin(dto.usernameOrEmail, dto.password);
-    // Si Keycloak exige cambio de clave devolvemos un código controlado
     if (!r.ok) {
       return { ok: false, code: r.code }; // 'PASSWORD_CHANGE_REQUIRED'
     }
@@ -37,7 +37,6 @@ export class FirstLoginController {
     const cookieName =
       this.cfg.get<string>('REFRESH_COOKIE_NAME') ?? 'ssr_refresh';
 
-    // booleans pueden venir como string en .env -> normalizamos
     const parseBool = (v: any, d = false) =>
       typeof v === 'string' ? v.toLowerCase() === 'true' : (v ?? d);
 
@@ -54,7 +53,6 @@ export class FirstLoginController {
     const path = this.cfg.get<string>('REFRESH_COOKIE_PATH') || '/';
     const domain = this.cfg.get<string>('REFRESH_COOKIE_DOMAIN') || undefined;
 
-    // maxAge: si no hay REFRESH_COOKIE_MAX_AGE_MS, usa REFRESH_TOKEN_TTL_SEC
     const maxAgeEnv = this.cfg.get<number>('REFRESH_COOKIE_MAX_AGE_MS');
     const ttlSec = this.cfg.get<number>('REFRESH_TOKEN_TTL_SEC') ?? 3600;
     const maxAge =
@@ -71,7 +69,21 @@ export class FirstLoginController {
       maxAge,
     });
 
-    // Igual que tu /auth/login/web: devolvemos el accessToken en JSON
     return { accessToken: tokens.access_token };
+  }
+
+  // ========= NUEVO: Cambio de contraseña manual (WEB) =========
+  @UseGuards(AuthGuard)
+  @Post('change-password/web')
+  async changePasswordWeb(
+    @Req() req: Request & { user?: any },
+    @Body() dto: ChangePasswordWebDto,
+  ) {
+    await this.svc.changePasswordForAuthenticatedUser(
+      (req as any).user,
+      dto.currentPassword,
+      dto.newPassword,
+    );
+    return { message: 'Contraseña actualizada correctamente' };
   }
 }
