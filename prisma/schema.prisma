@@ -67,9 +67,9 @@ model User {
   // NUEVO
   firstName      String?   // Nombre
   lastName       String?   // Apellido
-  cedula         String?   @unique  @db.VarChar(32) // única si viene; múltiples NULL permitidos
+  cedula         String?   @unique @db.VarChar(32) // única si viene; múltiples NULL permitidos
   celular        String?   @db.VarChar(32)
-  
+
   /// Override de sesiones concurrentes permitidas.
   /// Si es NULL, el backend aplica la política por rol:
   /// SUPERADMIN=3, ADMIN/GUARDIA/RESIDENTE=1
@@ -93,6 +93,8 @@ model User {
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  @@index([urbanizationId]) // 👈 añadido: acelera listados por urbanización
 }
 
 model Siren {
@@ -139,7 +141,6 @@ model Group {
 
   @@unique([urbanizationId, name])
 }
-
 
 model Assignment {
   id       String @id @default(uuid())
