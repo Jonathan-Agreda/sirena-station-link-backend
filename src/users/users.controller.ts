@@ -16,12 +16,13 @@ import {
   Res,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { Role } from '@prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import type { Request, Express, Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Controller('users')
 @UseGuards(AuthGuard, RolesGuard)
@@ -32,7 +33,7 @@ export class UsersController {
   @Get()
   @Roles('SUPERADMIN', 'ADMIN')
   findAll(@Req() req: Request) {
-    const user = req['user'];
+    const user = (req as any)['user'];
     return this.svc.findAll(user);
   }
 
@@ -42,7 +43,7 @@ export class UsersController {
   @Get(':id')
   @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findOne(@Param('id') id: string, @Req() req: Request) {
-    const user = req['user'];
+    const user = (req as any)['user'];
     return this.svc.findOne(id, user);
   }
 
@@ -50,28 +51,8 @@ export class UsersController {
   // ADMIN → crear solo en su propia urbanización
   @Post()
   @Roles('SUPERADMIN', 'ADMIN')
-  create(
-    @Body()
-    body: {
-      username: string;
-      email: string;
-      role: Role;
-      urbanizationId?: string;
-
-      // nuevos
-      firstName?: string | null;
-      lastName?: string | null;
-      cedula?: string | null;
-      celular?: string | null;
-      etapa?: string | null;
-      manzana?: string | null;
-      villa?: string | null;
-
-      alicuota?: boolean;
-    },
-    @Req() req: Request,
-  ) {
-    const user = req['user'];
+  create(@Body() body: CreateUserDto, @Req() req: Request) {
+    const user = (req as any)['user'];
     return this.svc.create(body, user);
   }
 
@@ -82,28 +63,10 @@ export class UsersController {
   @Roles('SUPERADMIN', 'ADMIN')
   update(
     @Param('id') id: string,
-    @Body()
-    body: Partial<{
-      email: string;
-      username: string;
-      role: Role;
-
-      // nuevos
-      firstName: string | null;
-      lastName: string | null;
-      cedula: string | null;
-      celular: string | null;
-      etapa: string | null;
-      manzana: string | null;
-      villa: string | null;
-
-      alicuota: boolean;
-      urbanizationId: string;
-      // sessionLimit se maneja en endpoint dedicado
-    }>,
+    @Body() body: UpdateUserDto,
     @Req() req: Request,
   ) {
-    const user = req['user'];
+    const user = (req as any)['user'];
     return this.svc.update(id, body, user);
   }
 
@@ -115,7 +78,7 @@ export class UsersController {
     @Body() body: { sessionLimit: number | null },
     @Req() req: Request,
   ) {
-    const user = req['user'];
+    const user = (req as any)['user'];
     return this.svc.update(id, { sessionLimit: body.sessionLimit }, user);
   }
 
@@ -124,7 +87,7 @@ export class UsersController {
   @Delete(':id')
   @Roles('SUPERADMIN', 'ADMIN')
   remove(@Param('id') id: string, @Req() req: Request) {
-    const user = req['user'];
+    const user = (req as any)['user'];
     return this.svc.remove(id, user);
   }
 
@@ -158,7 +121,7 @@ export class UsersController {
     if (!file) {
       throw new BadRequestException('Excel file is required (field "file")');
     }
-    const user = req['user'];
+    const user = (req as any)['user'];
     const isDry = String(dryRun).toLowerCase() !== 'false';
     const doKc = String(provisionKeycloak).toLowerCase() !== 'false';
     return this.svc.bulkImportUsers(file.buffer, user, {
@@ -178,7 +141,7 @@ export class UsersController {
     if (!file) {
       throw new BadRequestException('Excel file is required (field "file")');
     }
-    const user = req['user'];
+    const user = (req as any)['user'];
     return this.svc.bulkDeleteUsers(file.buffer, user);
   }
 
