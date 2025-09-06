@@ -1,16 +1,31 @@
-import { Controller, Get, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Put,
+  Body,
+  Req,
+  UseGuards,
+  BadRequestException,
+  NotFoundException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { PrismaService } from '../data/prisma.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
-import { Role } from '@prisma/client';
 import type { Request } from 'express';
+import { UpdateMyContactDto } from './dto/update-my-contact.dto';
+import { KeycloakAdminService } from '../auth/keycloak-admin.service';
 
 @Controller('residents')
 @UseGuards(AuthGuard, RolesGuard)
 export class ResidentsController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly kcAdmin: KeycloakAdminService,
+  ) {}
 
+  /* ------------------------- Perfil actual ------------------------- */
   @Get('me')
   @Roles('RESIDENTE', 'ADMIN', 'GUARDIA', 'SUPERADMIN')
   async me(@Req() req: Request) {
@@ -31,7 +46,6 @@ export class ResidentsController {
 
     if (!user) return { error: 'Usuario no encontrado' };
 
-    // 🔹 Convertir assignments → array de sirens
     const sirens = user.assignments.map((a) => a.siren);
 
     return {
@@ -46,7 +60,75 @@ export class ResidentsController {
       villa: user.villa,
       alicuota: user.alicuota,
       urbanizacion: user.urbanization,
-      sirens, // 🔹 ahora es un array
+      sirens,
+      cedula: user.cedula,
+      celular: user.celular,
     };
+  }
+
+  /* ----------------- Actualizar contacto propio ----------------- */
+  @Put('me/contact')
+  @Roles('RESIDENTE', 'ADMIN', 'GUARDIA', 'SUPERADMIN')
+  async updateMyContact(@Body() dto: UpdateMyContactDto, @Req() req: Request) {
+    const sub = req.user?.sub as string;
+
+    const current = await this.prisma.user.findUnique({
+      where: { keycloakId: sub },
+    });
+
+    if (!current) throw new NotFoundException('Usuario no encontrado');
+
+    const data: {
+      email?: string;
+      cedula?: string | null;
+      celular?: string | null;
+    } = {};
+
+    if (dto.email !== undefined) data.email = dto.email.trim().toLowerCase();
+    if (dto.cedula !== undefined)
+      data.cedula = dto.cedula ? dto.cedula.trim() : null;
+    if (dto.celular !== undefined)
+      data.celular = dto.celular ? dto.celular.trim() : null;
+
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException('No hay cambios para actualizar');
+    }
+
+    if (data.cedula && data.cedula !== current.cedula) {
+      const exists = await this.prisma.user.findFirst({
+        where: { cedula: data.cedula, id: { not: current.id } },
+      });
+      if (exists) throw new BadRequestException('La cédula ya está registrada');
+    }
+
+    // 🔹 Si cambia el email, primero sincronizar con Keycloak
+    if (data.email && data.email !== current.email) {
+      try {
+        await this.kcAdmin.updateUser(current.keycloakId as string, {
+          email: data.email,
+          // 🔑 aseguramos string válido, si viene null lo mandamos como undefined
+          username: current.username ?? undefined,
+        });
+      } catch (err) {
+        throw new InternalServerErrorException(
+          'No se pudo sincronizar email con Keycloak',
+        );
+      }
+    }
+
+    // 🔹 Guardar cambios en Prisma
+    const updated = await this.prisma.user.update({
+      where: { id: current.id },
+      data,
+      select: {
+        id: true,
+        email: true,
+        cedula: true,
+        celular: true,
+        updatedAt: true,
+      },
+    });
+
+    return { ok: true, user: updated };
   }
 }

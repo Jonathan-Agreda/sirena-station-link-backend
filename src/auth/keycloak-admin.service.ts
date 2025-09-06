@@ -1,3 +1,4 @@
+// src/auth/keycloak-admin.service.ts
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import axios, { AxiosInstance } from 'axios';
 import { URLSearchParams } from 'url';
@@ -22,8 +23,8 @@ type TokenResponse = {
 
 type RoleRepresentation = { id: string; name: string };
 
-// 👇 Tipo único para updates de usuario (ahora incluye firstName/lastName)
-type KCUserUpdate = {
+// 👇 Tipo único para updates de usuario
+export type KCUserUpdate = {
   username?: string;
   email?: string;
   enabled?: boolean;
@@ -57,7 +58,6 @@ export class KeycloakAdminService {
   }
   private adminClientSecret() {
     const secret = process.env.KEYCLOAK_CLIENT_SECRET || '';
-    // Evitar exponer secretos en logs
     this.logger.debug(`Using Client Secret: [REDACTED len=${secret.length}]`);
     return secret;
   }
@@ -109,10 +109,9 @@ export class KeycloakAdminService {
     return this.http;
   }
 
-  // 🔎 Buscar usuario por username o email
+  /* -------------------- Usuarios -------------------- */
   async findUserId(usernameOrEmail: string): Promise<KCUser | null> {
     const http = await this.client();
-
     const urlUser = `/users?username=${encodeURIComponent(usernameOrEmail)}&exact=true`;
     let res = await http.get(urlUser, { validateStatus: () => true });
     if (res.status === 200 && Array.isArray(res.data) && res.data.length > 0) {
@@ -129,7 +128,39 @@ export class KeycloakAdminService {
     return null;
   }
 
-  // 📡 Listar sesiones de usuario
+  async updateUserProfile(
+    userId: string,
+    data: KCUserUpdate,
+  ): Promise<boolean> {
+    const http = await this.client();
+    const body: Record<string, unknown> = {};
+    if (data.username !== undefined) body.username = data.username;
+    if (data.email !== undefined) body.email = data.email;
+    if (data.enabled !== undefined) body.enabled = data.enabled;
+    if (data.firstName !== undefined) body.firstName = data.firstName;
+    if (data.lastName !== undefined) body.lastName = data.lastName;
+
+    if (Object.keys(body).length === 0) return true;
+
+    const res = await http.put(`/users/${userId}`, body, {
+      validateStatus: () => true,
+    });
+
+    if (!(res.status >= 200 && res.status < 300)) {
+      this.logger.error(
+        `updateUserProfile error ${res.status}: ${JSON.stringify(res.data)}`,
+      );
+      return false;
+    }
+    return true;
+  }
+
+  // ✨ Nuevo alias más intuitivo
+  async updateUser(userId: string, data: KCUserUpdate): Promise<boolean> {
+    return this.updateUserProfile(userId, data);
+  }
+
+  /* -------------------- Sesiones -------------------- */
   async listUserSessions(userId: string): Promise<KCUserSession[]> {
     const http = await this.client();
     const res = await http.get(`/users/${userId}/sessions`, {
@@ -176,7 +207,73 @@ export class KeycloakAdminService {
     return res.status >= 200 && res.status < 300;
   }
 
-  // 🚀 Crear usuario en Keycloak
+  /* -------------------- Roles -------------------- */
+  async assignRealmRole(userId: string, roleName: string) {
+    const http = await this.client();
+    const { data: role } = await http.get(`/roles/${roleName}`, {
+      validateStatus: () => true,
+    });
+
+    const res = await http.post(
+      `/users/${userId}/role-mappings/realm`,
+      [role],
+      { validateStatus: () => true },
+    );
+
+    if (!(res.status >= 200 && res.status < 300)) {
+      this.logger.error(
+        `assignRealmRole error ${res.status}: ${JSON.stringify(res.data)}`,
+      );
+    }
+  }
+
+  async getRoleByName(roleName: string): Promise<RoleRepresentation> {
+    const http = await this.client();
+    const { data, status } = await http.get(`/roles/${roleName}`, {
+      validateStatus: () => true,
+    });
+    if (status !== 200) {
+      throw new Error(`getRoleByName ${status}: ${JSON.stringify(data)}`);
+    }
+    return data as RoleRepresentation;
+  }
+
+  async getUserRealmRoles(userId: string): Promise<RoleRepresentation[]> {
+    const http = await this.client();
+    const { data, status } = await http.get(
+      `/users/${userId}/role-mappings/realm`,
+      { validateStatus: () => true },
+    );
+    if (status !== 200) {
+      this.logger.error(`getUserRealmRoles ${status}: ${JSON.stringify(data)}`);
+      return [];
+    }
+    return data as RoleRepresentation[];
+  }
+
+  async replaceRealmRole(userId: string, newRoleName: string) {
+    const http = await this.client();
+    const current = await this.getUserRealmRoles(userId);
+    const managed = ['SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE'];
+    const toRemove = current.filter((r) => managed.includes(r.name));
+
+    if (toRemove.length) {
+      const del = await http.delete(`/users/${userId}/role-mappings/realm`, {
+        data: toRemove,
+        validateStatus: () => true,
+      });
+      if (!(del.status >= 200 && del.status < 300)) {
+        this.logger.error(
+          `replaceRealmRole(delete) ${del.status}: ${JSON.stringify(del.data)}`,
+        );
+        throw new Error('Keycloak remove roles failed');
+      }
+    }
+
+    await this.assignRealmRole(userId, newRoleName);
+  }
+
+  /* -------------------- CRUD básico -------------------- */
   async createUser(opts: {
     username: string;
     email: string;
@@ -184,8 +281,6 @@ export class KeycloakAdminService {
     temporaryPassword?: string;
   }): Promise<{ id: string }> {
     const http = await this.client();
-
-    // 1. Crear usuario
     const res = await http.post(
       `/users`,
       {
@@ -216,110 +311,10 @@ export class KeycloakAdminService {
     const id = location?.split('/').pop();
     if (!id) throw new Error('Keycloak createUser: no Location/ID');
 
-    // 2. Asignar rol
     await this.assignRealmRole(id, opts.role);
-
     return { id };
   }
 
-  // 🔑 Asignar rol de realm a usuario
-  async assignRealmRole(userId: string, roleName: string) {
-    const http = await this.client();
-
-    const { data: role } = await http.get(`/roles/${roleName}`, {
-      validateStatus: () => true,
-    });
-
-    const res = await http.post(
-      `/users/${userId}/role-mappings/realm`,
-      [role],
-      { validateStatus: () => true },
-    );
-
-    if (!(res.status >= 200 && res.status < 300)) {
-      this.logger.error(
-        `assignRealmRole error ${res.status}: ${JSON.stringify(res.data)}`,
-      );
-    }
-  }
-
-  // 🧩 Actualizar perfil (username/email/enabled/firstName/lastName)
-  async updateUserProfile(
-    userId: string,
-    data: KCUserUpdate,
-  ): Promise<boolean> {
-    const http = await this.client();
-    const body: Record<string, unknown> = {};
-    if (data.username !== undefined) body.username = data.username;
-    if (data.email !== undefined) body.email = data.email;
-    if (data.enabled !== undefined) body.enabled = data.enabled;
-    if (data.firstName !== undefined) body.firstName = data.firstName;
-    if (data.lastName !== undefined) body.lastName = data.lastName;
-
-    if (Object.keys(body).length === 0) return true; // nada que actualizar
-
-    const res = await http.put(`/users/${userId}`, body, {
-      validateStatus: () => true,
-    });
-
-    if (!(res.status >= 200 && res.status < 300)) {
-      this.logger.error(
-        `updateUserProfile error ${res.status}: ${JSON.stringify(res.data)}`,
-      );
-      return false;
-    }
-    return true;
-  }
-
-  // 📚 Utilidades de roles
-  async getRoleByName(roleName: string): Promise<RoleRepresentation> {
-    const http = await this.client();
-    const { data, status } = await http.get(`/roles/${roleName}`, {
-      validateStatus: () => true,
-    });
-    if (status !== 200) {
-      throw new Error(`getRoleByName ${status}: ${JSON.stringify(data)}`);
-    }
-    return data as RoleRepresentation;
-  }
-
-  async getUserRealmRoles(userId: string): Promise<RoleRepresentation[]> {
-    const http = await this.client();
-    const { data, status } = await http.get(
-      `/users/${userId}/role-mappings/realm`,
-      { validateStatus: () => true },
-    );
-    if (status !== 200) {
-      this.logger.error(`getUserRealmRoles ${status}: ${JSON.stringify(data)}`);
-      return [];
-    }
-    return data as RoleRepresentation[];
-  }
-
-  // 🔁 Reemplazar el rol (quita nuestros roles gestionados y asigna el nuevo)
-  async replaceRealmRole(userId: string, newRoleName: string) {
-    const http = await this.client();
-    const current = await this.getUserRealmRoles(userId);
-    const managed = ['SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE'];
-    const toRemove = current.filter((r) => managed.includes(r.name));
-
-    if (toRemove.length) {
-      const del = await http.delete(`/users/${userId}/role-mappings/realm`, {
-        data: toRemove,
-        validateStatus: () => true,
-      });
-      if (!(del.status >= 200 && del.status < 300)) {
-        this.logger.error(
-          `replaceRealmRole(delete) ${del.status}: ${JSON.stringify(del.data)}`,
-        );
-        throw new Error('Keycloak remove roles failed');
-      }
-    }
-
-    await this.assignRealmRole(userId, newRoleName);
-  }
-
-  // 🗑️ Borrar usuario
   async deleteUser(userId: string): Promise<boolean> {
     const http = await this.client();
     const res = await http.delete(`/users/${userId}`, {
