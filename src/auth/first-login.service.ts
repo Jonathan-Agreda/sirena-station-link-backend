@@ -133,6 +133,18 @@ export class FirstLoginService {
     return found.id;
   }
 
+  // ---- Obtener username/email por ID (cuando el token no trae preferred_username)
+  private async getUserUsernameById(
+    userId: string,
+  ): Promise<{ username?: string; email?: string }> {
+    const token = await this.adminToken();
+    const url = `${this.base}/admin/realms/${this.realm}/users/${userId}`;
+    const { data } = await axios.get<any>(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return { username: data?.username, email: data?.email };
+  }
+
   // ---- Reset password permanente y limpia required actions
   private async setPermanentPassword(
     userId: string,
@@ -199,9 +211,19 @@ export class FirstLoginService {
     currentPassword: string,
     newPassword: string,
   ): Promise<void> {
-    const username: string | undefined =
-      kcUser?.preferred_username || kcUser?.email;
+    // Claims típicos de KC: preferred_username | username | email | sub
     const sub: string | undefined = kcUser?.sub;
+    let username: string | undefined =
+      kcUser?.preferred_username ||
+      kcUser?.username ||
+      kcUser?.email ||
+      undefined;
+
+    // Si no vino en claims, consulta a KC por el sub
+    if (!username && sub) {
+      const u = await this.getUserUsernameById(sub).catch(() => null);
+      username = u?.username || u?.email || undefined;
+    }
 
     if (!username) {
       throw new UnauthorizedException('Usuario inválido');
