@@ -16,6 +16,7 @@ import { GroupsModule } from './groups/groups.module';
 import { ActivationLogsModule } from './activation-logs/activation-logs.module';
 import { AssignmentsModule } from './assignments/assignments.module'; // 👈 importar módulo
 import { ResidentsModule } from './residents/residents.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -35,7 +36,8 @@ import { ResidentsModule } from './residents/residents.module';
     GroupsModule,
     ActivationLogsModule,
     AssignmentsModule,
-    ResidentsModule, // 👈 registrar aquí
+    ResidentsModule,
+    MailModule, // 👈 registrar aquí
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

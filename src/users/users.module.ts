@@ -3,9 +3,10 @@ import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { PrismaService } from '../data/prisma.service';
 import { AuthModule } from '../auth/auth.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, MailModule],
   providers: [UsersService, PrismaService],
   controllers: [UsersController],
 })

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width"/>
+  <title>SirenaStationLink</title>
+  <style>
+    .container { max-width: 640px; margin: 0 auto; background: #ffffff; border-radius: 14px; border: 1px solid #e5e7eb; overflow:hidden; }
+    .header { padding: 0; background: {{brand.dark}}; border-radius: 14px 14px 0 0; text-align:center; }
+    .header img { display:block; max-width:100%; height:auto; margin:0 auto; }
+    .content { padding: 22px 24px; color:#111827; font-family: Inter, Segoe UI, Roboto, Arial, sans-serif; }
+    .card { background:#f7f7f9; border:1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; }
+    .muted { color:#6b7280; font-size: 12px; }
+    .cta { display:inline-block; padding: 12px 18px; border-radius: 12px; text-decoration:none; background: {{brand.primary}}; color:#fff; font-weight:600; }
+    .footer { padding: 18px 20px; color:#6b7280; border-top:1px solid #e5e7eb; font-size:12px; text-align:center; }
+    a { color: {{brand.primary}}; }
+
+    /* Responsive */
+    @media only screen and (max-width: 480px) {
+      .content { padding: 16px 18px; font-size: 15px; }
+      .card { padding: 12px 14px; font-size: 14px; }
+      .cta { display:block; text-align:center; width:100%; box-sizing:border-box; }
+    }
+  </style>
+</head>
+<body style="background:#f3f4f6;padding:20px">
+  <div class="container">
+    <div class="header">
+      {{#if logoUrl}}
+        <img src="{{logoUrl}}" alt="SirenaStationLink"/>
+      {{else}}
+        <img src="cid:{{logoCid}}" alt="SirenaStationLink"/>
+      {{/if}}
+    </div>
+    <div class="content">
+      {{{content}}}
+      {{> footer}}
+    </div>
+  </div>
+</body>
+</html>

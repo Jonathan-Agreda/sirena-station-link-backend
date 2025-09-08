@@ -1,0 +1,15 @@
+<h2 style="margin:0 0 8px">¡Bienvenido a SirenaStationLink!</h2>
+<p>Hola {{name}}, te hemos creado una cuenta.</p>
+
+<div class="card" style="margin:12px 0">
+  <div><b>Email:</b> {{email}}</div>
+  <div><b>Usuario:</b> {{username}}</div>
+  <div><b>Contraseña temporal:</b> {{tempPassword}}</div>
+</div>
+
+<p>Por seguridad, cambia tu contraseña en tu primer inicio de sesión.</p>
+{{> button href=loginUrl text="Ir a iniciar sesión"}}
+
+<p class="muted" style="margin-top:14px">
+  Si no solicitaste esta cuenta, ignora este mensaje.
+</p>
