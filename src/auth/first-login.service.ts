@@ -258,7 +258,15 @@ export class FirstLoginService {
     // 2) Cambiar contraseña permanente (usamos el sub si está, si no buscamos)
     const userId = sub ?? (await this.findUserId(username));
     await this.setPermanentPassword(userId, newPassword);
-
+    const user = await this.prisma.user.findUnique({
+      where: { keycloakId: sub },
+    });
+    if (user?.email) {
+      await this.mailService.sendPasswordUpdatedEmail({
+        to: user.email,
+        name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+      });
+    }
     // *No* devolvemos tokens aquí: el front no los necesita para este flujo.
     // (si quisieras rotarlos, podrías hacer passwordGrant con newPassword y setear cookie)
   }
