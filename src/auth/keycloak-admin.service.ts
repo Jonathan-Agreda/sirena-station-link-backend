@@ -2,6 +2,7 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import axios, { AxiosInstance } from 'axios';
 import { URLSearchParams } from 'url';
+import { ConfigService } from '@nestjs/config';
 
 type KCUser = { id: string; username: string; email?: string };
 export type KCUserSession = {
@@ -38,6 +39,8 @@ export class KeycloakAdminService {
   private http!: AxiosInstance;
 
   private adminToken?: { value: string; expiresAt: number };
+
+  constructor(private readonly config: ConfigService) {}
 
   private realm() {
     return process.env.KEYCLOAK_REALM || 'alarma';
@@ -112,13 +115,17 @@ export class KeycloakAdminService {
   /* -------------------- Usuarios -------------------- */
   async findUserId(usernameOrEmail: string): Promise<KCUser | null> {
     const http = await this.client();
-    const urlUser = `/users?username=${encodeURIComponent(usernameOrEmail)}&exact=true`;
+    const urlUser = `/users?username=${encodeURIComponent(
+      usernameOrEmail,
+    )}&exact=true`;
     let res = await http.get(urlUser, { validateStatus: () => true });
     if (res.status === 200 && Array.isArray(res.data) && res.data.length > 0) {
       return res.data[0] as KCUser;
     }
 
-    const urlEmail = `/users?email=${encodeURIComponent(usernameOrEmail)}&exact=true`;
+    const urlEmail = `/users?email=${encodeURIComponent(
+      usernameOrEmail,
+    )}&exact=true`;
     res = await http.get(urlEmail, { validateStatus: () => true });
     if (res.status === 200 && Array.isArray(res.data) && res.data.length > 0) {
       return res.data[0] as KCUser;
@@ -153,6 +160,30 @@ export class KeycloakAdminService {
       return false;
     }
     return true;
+  }
+  async sendForgotPasswordEmail(userId: string): Promise<void> {
+    const http = await this.client();
+    const redirectUri =
+      this.config.get<string>('KEYCLOAK_REDIRECT_URI') ||
+      'http://localhost:3000/login';
+    const clientId = this.adminClientId();
+
+    const url = `/users/${userId}/execute-actions-email?redirect_uri=${encodeURIComponent(
+      redirectUri,
+    )}&client_id=${encodeURIComponent(clientId)}`;
+
+    const res = await http.put(url, ['UPDATE_PASSWORD'], {
+      validateStatus: () => true,
+    });
+
+    if (res.status !== 200) {
+      this.logger.error(
+        `sendForgotPasswordEmail error ${res.status}: ${JSON.stringify(
+          res.data,
+        )}`,
+      );
+      throw new Error('Could not send forgot password email');
+    }
   }
 
   // ✨ Nuevo alias más intuitivo

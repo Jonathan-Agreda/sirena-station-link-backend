@@ -5,6 +5,7 @@ import { FirstLoginPasswordDto, PreloginDto } from './dto/first-login.dto';
 import { ConfigService } from '@nestjs/config';
 import { ChangePasswordWebDto } from './dto/change-password.dto';
 import { AuthGuard } from './auth.guard';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 
 @Controller('auth')
 export class FirstLoginController {
@@ -85,5 +86,14 @@ export class FirstLoginController {
       dto.newPassword,
     );
     return { message: 'Contraseña actualizada correctamente' };
+  }
+
+  @Post('forgot-password')
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    await this.svc.sendForgotPasswordLink(dto.email);
+    return {
+      message:
+        'Si el correo electrónico está registrado, recibirás un enlace para restablecer tu contraseña.',
+    };
   }
 }

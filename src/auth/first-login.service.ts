@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../data/prisma.service';
+import { KeycloakAdminService } from './keycloak-admin.service';
 
 type TokenResponse = {
   access_token: string;
@@ -34,6 +35,7 @@ export class FirstLoginService {
     private readonly cfg: ConfigService,
     private readonly mailService: MailService,
     private readonly prisma: PrismaService,
+    private readonly kcAdmin: KeycloakAdminService,
   ) {}
 
   // ---- Helpers de configuración
@@ -188,6 +190,29 @@ export class FirstLoginService {
         };
       }
       throw new UnauthorizedException('Credenciales inválidas');
+    }
+  }
+
+  async sendForgotPasswordLink(email: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (user && user.keycloakId) {
+      try {
+        await this.kcAdmin.sendForgotPasswordEmail(user.keycloakId);
+        await this.mailService.sendForgotPasswordEmail({
+          to: user.email,
+          name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+          resetUrl: '',
+        });
+      } catch (error) {
+        this.log.error(
+          `Failed to send password reset email to ${email}`,
+          error,
+        );
+      }
+    } else {
+      this.log.warn(
+        `Password reset requested for non-existent email: ${email}`,
+      );
     }
   }
 
