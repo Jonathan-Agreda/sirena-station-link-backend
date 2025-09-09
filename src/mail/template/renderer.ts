@@ -6,13 +6,16 @@ import Handlebars from 'handlebars';
 import juice from 'juice';
 import { minify } from 'html-minifier';
 
+type TemplateName =
+  | 'welcome-user'
+  | 'first-change-password'
+  | 'forgot-password'
+  | 'contact'
+  | 'profile-updated'
+  | 'password-updated'; // 👈 nuevo agregado
+
 type RenderOptions = {
-  template:
-    | 'welcome-user'
-    | 'first-change-password'
-    | 'forgot-password'
-    | 'contact'
-    | 'profile-updated';
+  template: TemplateName;
   data: Record<string, any>;
 };
 

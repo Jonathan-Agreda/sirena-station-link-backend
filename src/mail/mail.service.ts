@@ -43,7 +43,7 @@ export class MailService {
   }
 
   private from() {
-    const name = this.config.get('MAIL_FROM_NAME') || 'Sirena Station Link';
+    const name = this.config.get('MAIL_FROM_NAME') || 'SirenaStationLink';
     const email =
       this.config.get('MAIL_FROM_EMAIL') || this.config.get('MAIL_USER');
     return `"${name}" <${email}>`;
@@ -88,9 +88,17 @@ export class MailService {
 
   // === Primer cambio de contraseña ===
   async sendFirstChangePasswordEmail(p: FirstChangePayload) {
+    const loginUrl =
+      p.changeUrl ||
+      this.config.get('APP_LOGIN_URL') ||
+      'https://sirenastationlink.disxor.com/login';
+
     const html = this.renderer.render({
       template: 'first-change-password',
-      data: p,
+      data: {
+        name: p.name,
+        loginUrl, // 👈 ahora sí se pasa al template
+      },
     });
 
     const attachments: NonNullable<nodemailer.SendMailOptions['attachments']> =
@@ -101,7 +109,7 @@ export class MailService {
     return this.transporter.sendMail({
       from: this.from(),
       to: p.to,
-      subject: 'Cambiar contraseña (primer acceso) — Sirena Station Link',
+      subject: 'Contraseña Actualizada (primer acceso) — SirenaStationLink',
       html,
       text: this.renderer.toText(html),
       attachments,
@@ -120,7 +128,7 @@ export class MailService {
     return this.transporter.sendMail({
       from: this.from(),
       to: p.to,
-      subject: 'Restablecer contraseña — Sirena Station Link',
+      subject: 'Restablecer contraseña — SirenaStationLink',
       html,
       text: this.renderer.toText(html),
       attachments,
@@ -147,8 +155,18 @@ export class MailService {
   }
 
   // === Perfil actualizado ===
-  async sendProfileUpdatedEmail(p: ProfilePayload) {
-    const html = this.renderer.render({ template: 'profile-updated', data: p });
+  async sendProfileUpdatedEmail(p: { to: string; name: string }) {
+    const loginUrl =
+      this.config.get('APP_LOGIN_URL') ||
+      'https://sirenastationlink.disxor.com/login';
+
+    const html = this.renderer.render({
+      template: 'profile-updated',
+      data: {
+        name: p.name,
+        loginUrl,
+      },
+    });
 
     const attachments: NonNullable<nodemailer.SendMailOptions['attachments']> =
       [];
@@ -158,7 +176,33 @@ export class MailService {
     return this.transporter.sendMail({
       from: this.from(),
       to: p.to,
-      subject: 'Actualización de datos — Sirena Station Link',
+      subject: 'Perfil actualizado — SirenaStationLink',
+      html,
+      text: this.renderer.toText(html),
+      attachments,
+    });
+  }
+
+  // === Confirmación de cambio de contraseña ===
+  async sendPasswordUpdatedEmail(p: { to: string; name: string }) {
+    const loginUrl =
+      this.config.get('APP_LOGIN_URL') ||
+      'https://sirenastationlink.disxor.com/login';
+
+    const html = this.renderer.render({
+      template: 'password-updated',
+      data: { name: p.name, loginUrl },
+    });
+
+    const attachments: NonNullable<nodemailer.SendMailOptions['attachments']> =
+      [];
+    const logo = this.renderer.getLogoAttachment();
+    if (logo) attachments.push(logo);
+
+    return this.transporter.sendMail({
+      from: this.from(),
+      to: p.to,
+      subject: 'Confirmación de cambio de contraseña — SirenaStationLink',
       html,
       text: this.renderer.toText(html),
       attachments,

@@ -1,6 +1,16 @@
-<h2 style='margin:0 0 8px'>Actualización de datos</h2>
-<p>Hola {{name}}, tus datos han sido actualizados correctamente.</p>
-<div class='card' style='margin:12px 0'>
-  <div>{{details}}</div>
-</div>
-<p class='muted'>Si no reconoces este cambio, por favor contacta al soporte.</p>
+{{! =========================== }}
+{{! profile-updated.hbs }}
+{{! =========================== }}
+
+<h2 style="margin:0 0 8px">¡Actualización de perfil exitosa!</h2>
+
+<p>Hola {{name}}, confirmamos que tu perfil en 
+<b>SirenaStationLink</b> ha sido actualizado correctamente.</p>
+
+<p>Puedes ingresar al sistema para revisar tu información en cualquier momento.</p>
+
+{{> button href=loginUrl text="Revisar mi perfil"}}
+
+<p class="muted" style="margin-top:14px">
+  Si no realizaste esta actualización, contacta inmediatamente con el administrador de tu urbanización.
+</p>
