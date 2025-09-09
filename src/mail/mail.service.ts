@@ -6,7 +6,7 @@ import { TemplateRenderer } from './template/renderer';
 type WelcomePayload = {
   to: string;
   name: string;
-  username: string; // 👈 ahora requerido
+  username: string;
   tempPassword?: string;
   loginUrl?: string;
 };
@@ -19,6 +19,14 @@ type ContactPayload = {
   message: string;
 };
 type ProfilePayload = { to: string; name: string; details: string };
+
+// 👇 Añadir nuevo tipo de payload
+type SirenAssignedPayload = {
+  to: string;
+  name: string;
+  deviceId: string;
+  appUrl: string;
+};
 
 @Injectable()
 export class MailService {
@@ -63,7 +71,7 @@ export class MailService {
       data: {
         name: p.name,
         email: p.to,
-        username: p.username, // 👈 ahora sí se pasa al template
+        username: p.username,
         tempPassword,
         loginUrl,
       },
@@ -97,7 +105,7 @@ export class MailService {
       template: 'first-change-password',
       data: {
         name: p.name,
-        loginUrl, // 👈 ahora sí se pasa al template
+        loginUrl,
       },
     });
 
@@ -228,5 +236,29 @@ export class MailService {
       text: this.renderer.toText(html),
       attachments,
     });
+  }
+
+  // 👇 AÑADIR NUEVO MÉTODO
+  // === Notificación de Sirena Asignada ===
+  async sendSirenAssignedEmail(p: SirenAssignedPayload) {
+    const html = this.renderer.render({
+      template: 'siren-assigned',
+      data: p,
+    });
+    const attachments: NonNullable<nodemailer.SendMailOptions['attachments']> =
+      [];
+    const logo = this.renderer.getLogoAttachment();
+    if (logo) attachments.push(logo);
+
+    const info = await this.transporter.sendMail({
+      from: this.from(),
+      to: p.to,
+      subject: 'Te han asignado una nueva sirena - SirenaStationLink',
+      html,
+      text: this.renderer.toText(html),
+      attachments,
+    });
+    this.logger.log(`Siren Assigned → ${p.to} (${info.messageId})`);
+    return info;
   }
 }

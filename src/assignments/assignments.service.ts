@@ -8,6 +8,8 @@ import { PrismaService } from '../data/prisma.service';
 import { Role, type User, type Siren } from '@prisma/client';
 import type { AuthUser } from '../auth/auth.guard';
 import * as ExcelJS from 'exceljs';
+import { MailService } from '../mail/mail.service';
+import { ConfigService } from '@nestjs/config';
 
 type BulkOptions = { dryRun?: boolean };
 
@@ -27,7 +29,11 @@ function parseBoolean(v: any, fallback = true): boolean {
 
 @Injectable()
 export class AssignmentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly mailService: MailService,
+    private readonly config: ConfigService,
+  ) {}
 
   // ✅ Crear asignación (individual)
   async assign(userId: string, sirenId: string, currentUser: AuthUser) {
@@ -54,10 +60,30 @@ export class AssignmentsService {
       }
     }
 
-    return this.prisma.assignment.create({
+    const newAssignment = await this.prisma.assignment.create({
       data: { userId, sirenId, active: true },
       include: { user: true, siren: true },
     });
+
+    // Notificar al usuario por correo
+    if (newAssignment.user.email) {
+      const appUrl =
+        this.config.get('APP_LOGIN_URL') ||
+        'https://sirenastationlink.disxor.com';
+      await this.mailService.sendSirenAssignedEmail({
+        to: newAssignment.user.email,
+        name:
+          `${newAssignment.user.firstName ?? ''} ${
+            newAssignment.user.lastName ?? ''
+          }`.trim() ||
+          newAssignment.user.username ||
+          '',
+        deviceId: newAssignment.siren.deviceId,
+        appUrl,
+      });
+    }
+
+    return newAssignment;
   }
 
   // ✅ Quitar asignación
@@ -200,6 +226,9 @@ export class AssignmentsService {
   ) {
     const { dryRun = true } = opts;
     const rows = await this.readSheet(buffer);
+    const appUrl =
+      this.config.get('APP_LOGIN_URL') ||
+      'https://sirenastationlink.disxor.com';
 
     let toCreate = 0,
       toUpdate = 0;
@@ -256,6 +285,18 @@ export class AssignmentsService {
           await this.prisma.assignment.create({
             data: { userId: user.id, sirenId: siren.id, active },
           });
+          // Notificar en la creación bulk
+          if (user.email && active) {
+            await this.mailService.sendSirenAssignedEmail({
+              to: user.email,
+              name:
+                `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() ||
+                user.username ||
+                '',
+              deviceId: siren.deviceId,
+              appUrl,
+            });
+          }
         }
         report.push({
           user: user.email,
@@ -269,6 +310,18 @@ export class AssignmentsService {
             where: { id: existing.id },
             data: { active },
           });
+          // Notificar si se activa una asignación existente
+          if (user.email && active && !existing.active) {
+            await this.mailService.sendSirenAssignedEmail({
+              to: user.email,
+              name:
+                `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() ||
+                user.username ||
+                '',
+              deviceId: siren.deviceId,
+              appUrl,
+            });
+          }
         }
         report.push({
           user: user.email,

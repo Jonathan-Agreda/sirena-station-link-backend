@@ -13,7 +13,8 @@ type TemplateName =
   | 'contact'
   | 'profile-updated'
   | 'password-updated'
-  | 'user-deleted'; // 👈 nuevo agregado
+  | 'user-deleted'
+  | 'siren-assigned'; // 👈 Añadir nueva plantilla
 
 type RenderOptions = {
   template: TemplateName;
