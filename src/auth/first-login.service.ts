@@ -168,7 +168,6 @@ export class FirstLoginService {
     }
   }
 
-  // 👇 MÉTODO MODIFICADO
   async sendForgotPasswordLink(email: string): Promise<void> {
     this.log.debug(`[Forgot Password] Solicitud para el email: ${email}`);
     const user = await this.prisma.user.findUnique({ where: { email } });
@@ -192,7 +191,9 @@ export class FirstLoginService {
         `[Forgot Password] Token de reseteo generado y guardado para el usuario ${user.id}`,
       );
 
-      const resetUrl = `${this.cfg.get('APP_LOGIN_URL').replace('/login', '')}/reset-password?token=${token}`;
+      const resetUrl = `${this.cfg
+        .get('APP_LOGIN_URL')
+        .replace('/login', '')}/reset-password?token=${token}`;
 
       await this.mailService.sendForgotPasswordEmail({
         to: user.email,
@@ -209,7 +210,6 @@ export class FirstLoginService {
     }
   }
 
-  // 👇 NUEVO MÉTODO AÑADIDO
   async resetPasswordWithToken(
     token: string,
     newPassword: string,
@@ -224,7 +224,10 @@ export class FirstLoginService {
       user.passwordResetExpires < new Date()
     ) {
       this.log.warn(
-        `[Reset Password] Se intentó usar un token inválido o expirado: ${token.substring(0, 10)}...`,
+        `[Reset Password] Se intentó usar un token inválido o expirado: ${token.substring(
+          0,
+          10,
+        )}...`,
       );
       throw new BadRequestException(
         'El token de restablecimiento es inválido o ha expirado.',
@@ -245,6 +248,17 @@ export class FirstLoginService {
     );
 
     await this.setPermanentPassword(user.keycloakId, newPassword);
+
+    // 👇 CORRECCIÓN: Enviar correo de confirmación de cambio exitoso
+    if (user.email) {
+      await this.mailService.sendPasswordUpdatedEmail({
+        to: user.email,
+        name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+      });
+      this.log.debug(
+        `[Reset Password] Email de confirmación de cambio enviado a ${user.email}.`,
+      );
+    }
 
     await this.prisma.user.update({
       where: { id: user.id },
