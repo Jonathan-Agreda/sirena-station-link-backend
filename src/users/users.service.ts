@@ -8,6 +8,7 @@ import { PrismaService } from '../data/prisma.service';
 import { Role } from '@prisma/client';
 import { KeycloakAdminService } from '../auth/keycloak-admin.service';
 import * as ExcelJS from 'exceljs';
+import { MailService } from '../mail/mail.service';
 
 type BulkOptions = { dryRun?: boolean; provisionKeycloak?: boolean };
 
@@ -85,6 +86,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private kcAdmin: KeycloakAdminService,
+    private readonly mailService: MailService,
   ) {}
 
   // 📌 Listar usuarios
@@ -202,7 +204,7 @@ export class UsersService {
     }
 
     // Guardar en BD
-    return this.prisma.user.create({
+    const newUser = await this.prisma.user.create({
       data: {
         ...data,
         username,
@@ -218,6 +220,15 @@ export class UsersService {
         villa,
       },
     });
+    // Enviar correo de bienvenida
+    if (newUser.email) {
+      await this.mailService.sendWelcomeUserEmail({
+        to: newUser.email,
+        name: `${newUser.firstName ?? ''} ${newUser.lastName ?? ''}`.trim(),
+        username: newUser.username ?? '',
+      });
+    }
+    return newUser;
   }
 
   // 📌 Actualizar usuario (endpoint individual)
@@ -673,7 +684,7 @@ export class UsersService {
             }
           }
 
-          await this.prisma.user.create({
+          const newUser = await this.prisma.user.create({
             data: {
               email: res.email || `${res.username}@placeholder.local`,
               username: res.username,
@@ -689,6 +700,15 @@ export class UsersService {
               villa: res.villa,
             },
           });
+          if (newUser.email) {
+            await this.mailService.sendWelcomeUserEmail({
+              to: newUser.email,
+              name: `${newUser.firstName ?? ''} ${
+                newUser.lastName ?? ''
+              }`.trim(),
+              username: newUser.username ?? '',
+            });
+          }
         }
         report.push({
           key: res.email || res.username,
