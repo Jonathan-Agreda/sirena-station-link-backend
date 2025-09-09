@@ -670,7 +670,7 @@ export class UsersService {
           if (provisionKeycloak) {
             const kc = await this.kcAdmin.createUser({
               username: res.username || res.email,
-              email: res.email || `${res.username}@placeholder.local`,
+              email: res.email || `${res.username}@actualizarcorreo.disxor`,
               role: res.role as Role,
               temporaryPassword: defaultPass,
             });
@@ -686,7 +686,7 @@ export class UsersService {
 
           const newUser = await this.prisma.user.create({
             data: {
-              email: res.email || `${res.username}@placeholder.local`,
+              email: res.email || `${res.username}@actualizarcorreo.disxor`,
               username: res.username,
               role: res.role as Role,
               urbanizationId,

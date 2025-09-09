@@ -8,8 +8,10 @@ import { AuthGuard } from './auth.guard';
 import { RolesGuard } from './roles.guard';
 import { FirstLoginController } from './first-login.controller';
 import { FirstLoginService } from './first-login.service';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
+  imports: [MailModule],
   controllers: [AuthController, FirstLoginController],
   providers: [
     OidcService,

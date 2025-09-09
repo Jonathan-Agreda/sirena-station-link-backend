@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { MailService } from '../mail/mail.service';
+import { PrismaService } from '../data/prisma.service';
 
 type TokenResponse = {
   access_token: string;
@@ -17,10 +19,10 @@ type TokenResponse = {
 
 /**
  * Servicio encapsulado para:
- *  - Probar credenciales contra Keycloak (password grant)
- *  - Detectar "required actions" (UPDATE_PASSWORD)
- *  - Cambiar la contraseña con el Admin API (service account)
- *  - (Nuevo) Cambiar contraseña manual para un usuario autenticado
+ * - Probar credenciales contra Keycloak (password grant)
+ * - Detectar "required actions" (UPDATE_PASSWORD)
+ * - Cambiar la contraseña con el Admin API (service account)
+ * - (Nuevo) Cambiar contraseña manual para un usuario autenticado
  *
  * 👉 No tocamos tu OidcService/KeycloakAdminService para no romper nada.
  */
@@ -28,7 +30,11 @@ type TokenResponse = {
 export class FirstLoginService {
   private readonly log = new Logger(FirstLoginService.name);
 
-  constructor(private readonly cfg: ConfigService) {}
+  constructor(
+    private readonly cfg: ConfigService,
+    private readonly mailService: MailService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   // ---- Helpers de configuración
   private get base(): string {
@@ -200,6 +206,19 @@ export class FirstLoginService {
 
     const userId = await this.findUserId(usernameOrEmail);
     await this.setPermanentPassword(userId, newPassword);
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ username: usernameOrEmail }, { email: usernameOrEmail }],
+      },
+    });
+
+    if (user?.email) {
+      await this.mailService.sendFirstChangePasswordEmail({
+        to: user.email,
+        name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+        changeUrl: '',
+      });
+    }
 
     const tokens = await this.passwordGrant(usernameOrEmail, newPassword);
     return tokens;
