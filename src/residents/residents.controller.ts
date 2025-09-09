@@ -16,6 +16,7 @@ import { Roles } from '../auth/roles.decorator';
 import type { Request } from 'express';
 import { UpdateMyContactDto } from './dto/update-my-contact.dto';
 import { KeycloakAdminService } from '../auth/keycloak-admin.service';
+import { MailService } from '../mail/mail.service';
 
 @Controller('residents')
 @UseGuards(AuthGuard, RolesGuard)
@@ -23,6 +24,7 @@ export class ResidentsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly kcAdmin: KeycloakAdminService,
+    private readonly mailService: MailService,
   ) {}
 
   /* ------------------------- Perfil actual ------------------------- */
@@ -123,11 +125,19 @@ export class ResidentsController {
       select: {
         id: true,
         email: true,
+        firstName: true,
+        lastName: true,
         cedula: true,
         celular: true,
         updatedAt: true,
       },
     });
+    if (updated.email) {
+      await this.mailService.sendProfileUpdatedEmail({
+        to: updated.email,
+        name: `${updated.firstName ?? ''} ${updated.lastName ?? ''}`.trim(),
+      });
+    }
 
     return { ok: true, user: updated };
   }
