@@ -18,15 +18,6 @@ type TokenResponse = {
   token_type: 'Bearer';
 };
 
-/**
- * Servicio encapsulado para:
- * - Probar credenciales contra Keycloak (password grant)
- * - Detectar "required actions" (UPDATE_PASSWORD)
- * - Cambiar la contraseña con el Admin API (service account)
- * - (Nuevo) Cambiar contraseña manual para un usuario autenticado
- *
- * 👉 No tocamos tu OidcService/KeycloakAdminService para no romper nada.
- */
 @Injectable()
 export class FirstLoginService {
   private readonly log = new Logger(FirstLoginService.name);
@@ -48,7 +39,6 @@ export class FirstLoginService {
     return this.cfg.get<string>('KEYCLOAK_REALM') ?? 'alarma';
   }
   private get backendClientId(): string {
-    // service-account con realm-management:realm-admin
     return (
       this.cfg.get<string>('KEYCLOAK_ADMIN_CLIENT_ID') ??
       this.cfg.get<string>('KEYCLOAK_CLIENT_ID') ??
@@ -85,7 +75,6 @@ export class FirstLoginService {
     });
 
     if (!data?.access_token) {
-      // Keycloak suele responder 400 invalid_grant con detalles
       throw Object.assign(new UnauthorizedException('invalid_grant'), {
         response: { status },
       });
@@ -96,11 +85,7 @@ export class FirstLoginService {
   // ---- Detecta si el error de KC es "required actions / update password"
   private isPasswordChangeRequired(e: any): boolean {
     const status = e?.response?.status ?? 400;
-    // KC responde 400 invalid_grant + "Action required" o similar
-    return (
-      status === 400
-      // no necesitamos más heurística aquí para el flujo nuevo
-    );
+    return status === 400;
   }
 
   // ---- Token de service-account (client_credentials) para Admin API
@@ -120,9 +105,9 @@ export class FirstLoginService {
   // ---- Buscar usuario en KC por username o email
   private async findUserId(usernameOrEmail: string): Promise<string> {
     const token = await this.adminToken();
-    const searchUrl = `${this.base}/admin/realms/${this.realm}/users?search=${encodeURIComponent(
-      usernameOrEmail,
-    )}&exact=true`;
+    const searchUrl = `${this.base}/admin/realms/${
+      this.realm
+    }/users?search=${encodeURIComponent(usernameOrEmail)}&exact=true`;
     const { data } = await axios.get<any[]>(searchUrl, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -160,7 +145,6 @@ export class FirstLoginService {
   ): Promise<void> {
     const token = await this.adminToken();
 
-    // 1) reset password
     const resetUrl = `${this.base}/admin/realms/${this.realm}/users/${userId}/reset-password`;
     await axios.put(
       resetUrl,
@@ -168,7 +152,6 @@ export class FirstLoginService {
       { headers: { Authorization: `Bearer ${token}` } },
     );
 
-    // 2) limpiar required actions (por si quedó UPDATE_PASSWORD)
     const userUrl = `${this.base}/admin/realms/${this.realm}/users/${userId}`;
     await axios.put(
       userUrl,
@@ -194,24 +177,38 @@ export class FirstLoginService {
   }
 
   async sendForgotPasswordLink(email: string): Promise<void> {
+    this.log.debug(
+      `[Forgot Password] El servicio ha sido invocado para el email: ${email}`,
+    );
     const user = await this.prisma.user.findUnique({ where: { email } });
+
     if (user && user.keycloakId) {
+      this.log.debug(
+        `[Forgot Password] Usuario encontrado en DB. ID de Keycloak: ${user.keycloakId}`,
+      );
       try {
         await this.kcAdmin.sendForgotPasswordEmail(user.keycloakId);
+        this.log.debug(
+          `[Forgot Password] La llamada a Keycloak para enviar el email a ${user.keycloakId} fue exitosa.`,
+        );
+
         await this.mailService.sendForgotPasswordEmail({
           to: user.email,
           name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
-          resetUrl: '',
+          resetUrl: '', // Se deja vacío a propósito. El enlace real lo envía Keycloak.
         });
+        this.log.debug(
+          `[Forgot Password] Correo de notificación (plantilla interna) enviado a ${user.email}`,
+        );
       } catch (error) {
         this.log.error(
-          `Failed to send password reset email to ${email}`,
+          `[Forgot Password] FALLÓ la llamada a Keycloak para el email ${email}. Error:`,
           error,
         );
       }
     } else {
       this.log.warn(
-        `Password reset requested for non-existent email: ${email}`,
+        `[Forgot Password] Se solicitó reseteo, pero el email no fue encontrado o no tiene un ID de Keycloak asociado en la DB: ${email}`,
       );
     }
   }
@@ -255,7 +252,6 @@ export class FirstLoginService {
     currentPassword: string,
     newPassword: string,
   ): Promise<void> {
-    // Claims típicos de KC: preferred_username | username | email | sub
     const sub: string | undefined = kcUser?.sub;
     let username: string | undefined =
       kcUser?.preferred_username ||
@@ -263,7 +259,6 @@ export class FirstLoginService {
       kcUser?.email ||
       undefined;
 
-    // Si no vino en claims, consulta a KC por el sub
     if (!username && sub) {
       const u = await this.getUserUsernameById(sub).catch(() => null);
       username = u?.username || u?.email || undefined;
@@ -273,14 +268,12 @@ export class FirstLoginService {
       throw new UnauthorizedException('Usuario inválido');
     }
 
-    // 1) Verificar contraseña actual (password grant contra KC)
     try {
       await this.passwordGrant(username, currentPassword);
     } catch {
       throw new UnauthorizedException('Contraseña actual incorrecta');
     }
 
-    // 2) Cambiar contraseña permanente (usamos el sub si está, si no buscamos)
     const userId = sub ?? (await this.findUserId(username));
     await this.setPermanentPassword(userId, newPassword);
     const user = await this.prisma.user.findUnique({
@@ -292,7 +285,5 @@ export class FirstLoginService {
         name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
       });
     }
-    // *No* devolvemos tokens aquí: el front no los necesita para este flujo.
-    // (si quisieras rotarlos, podrías hacer passwordGrant con newPassword y setear cookie)
   }
 }

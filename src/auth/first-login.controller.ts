@@ -1,4 +1,12 @@
-import { Body, Controller, Post, Res, UseGuards, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Post,
+  Res,
+  UseGuards,
+  Req,
+  Logger, // 👈 Asegúrate de que este import esté
+} from '@nestjs/common';
 import type { Response, Request } from 'express';
 import { FirstLoginService } from './first-login.service';
 import { FirstLoginPasswordDto, PreloginDto } from './dto/first-login.dto';
@@ -9,6 +17,8 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 
 @Controller('auth')
 export class FirstLoginController {
+  private readonly logger = new Logger(FirstLoginController.name); // 👈 Añadido para logs
+
   constructor(
     private readonly svc: FirstLoginService,
     private readonly cfg: ConfigService,
@@ -18,7 +28,7 @@ export class FirstLoginController {
   async prelogin(@Body() dto: PreloginDto) {
     const r = await this.svc.prelogin(dto.usernameOrEmail, dto.password);
     if (!r.ok) {
-      return { ok: false, code: r.code }; // 'PASSWORD_CHANGE_REQUIRED'
+      return { ok: false, code: r.code };
     }
     return { ok: true };
   }
@@ -34,26 +44,20 @@ export class FirstLoginController {
       dto.newPassword,
     );
 
-    // ===== Cookies según tu .env =====
     const cookieName =
       this.cfg.get<string>('REFRESH_COOKIE_NAME') ?? 'ssr_refresh';
-
     const parseBool = (v: any, d = false) =>
       typeof v === 'string' ? v.toLowerCase() === 'true' : (v ?? d);
-
     const secure = parseBool(this.cfg.get('REFRESH_COOKIE_SECURE'), false);
     const httpOnly = parseBool(this.cfg.get('REFRESH_COOKIE_HTTPONLY'), true);
-
     const sameSiteRaw = (
       this.cfg.get<string>('REFRESH_COOKIE_SAMESITE') ?? 'Lax'
     ).toLowerCase();
     const sameSite = (
       ['lax', 'strict', 'none'].includes(sameSiteRaw) ? sameSiteRaw : 'lax'
     ) as 'lax' | 'strict' | 'none';
-
     const path = this.cfg.get<string>('REFRESH_COOKIE_PATH') || '/';
     const domain = this.cfg.get<string>('REFRESH_COOKIE_DOMAIN') || undefined;
-
     const maxAgeEnv = this.cfg.get<number>('REFRESH_COOKIE_MAX_AGE_MS');
     const ttlSec = this.cfg.get<number>('REFRESH_TOKEN_TTL_SEC') ?? 3600;
     const maxAge =
@@ -73,7 +77,6 @@ export class FirstLoginController {
     return { accessToken: tokens.access_token };
   }
 
-  // ========= NUEVO: Cambio de contraseña manual (WEB) =========
   @UseGuards(AuthGuard)
   @Post('change-password/web')
   async changePasswordWeb(
@@ -90,6 +93,9 @@ export class FirstLoginController {
 
   @Post('forgot-password')
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    this.logger.log(
+      `[Forgot Password] Endpoint recibido con email: ${dto.email}`,
+    );
     await this.svc.sendForgotPasswordLink(dto.email);
     return {
       message:
