@@ -208,4 +208,25 @@ export class MailService {
       attachments,
     });
   }
+
+  // === Notificación de eliminación de cuenta ===
+  async sendUserDeletedEmail(p: { to: string; name: string }) {
+    const html = this.renderer.render({
+      template: 'user-deleted',
+      data: { name: p.name },
+    });
+    const attachments: NonNullable<nodemailer.SendMailOptions['attachments']> =
+      [];
+    const logo = this.renderer.getLogoAttachment();
+    if (logo) attachments.push(logo);
+
+    return this.transporter.sendMail({
+      from: this.from(),
+      to: p.to,
+      subject: 'Tu cuenta en SirenaStationLink ha sido eliminada',
+      html,
+      text: this.renderer.toText(html),
+      attachments,
+    });
+  }
 }

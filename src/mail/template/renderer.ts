@@ -12,7 +12,8 @@ type TemplateName =
   | 'forgot-password'
   | 'contact'
   | 'profile-updated'
-  | 'password-updated'; // 👈 nuevo agregado
+  | 'password-updated'
+  | 'user-deleted'; // 👈 nuevo agregado
 
 type RenderOptions = {
   template: TemplateName;

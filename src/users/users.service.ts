@@ -414,6 +414,12 @@ export class UsersService {
         );
       }
     }
+    if (user.email) {
+      await this.mailService.sendUserDeletedEmail({
+        to: user.email,
+        name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+      });
+    }
 
     return this.prisma.user.delete({ where: { id } });
   }
@@ -670,7 +676,7 @@ export class UsersService {
           if (provisionKeycloak) {
             const kc = await this.kcAdmin.createUser({
               username: res.username || res.email,
-              email: res.email || `${res.username}@actualizarcorreo.disxor`,
+              email: res.email || `${res.username}@placeholder.local`,
               role: res.role as Role,
               temporaryPassword: defaultPass,
             });
@@ -686,7 +692,7 @@ export class UsersService {
 
           const newUser = await this.prisma.user.create({
             data: {
-              email: res.email || `${res.username}@actualizarcorreo.disxor`,
+              email: res.email || `${res.username}@placeholder.local`,
               username: res.username,
               role: res.role as Role,
               urbanizationId,
@@ -878,6 +884,12 @@ export class UsersService {
             `Failed to delete user in Keycloak: ${target.keycloakId}`,
           );
         }
+      }
+      if (target.email) {
+        await this.mailService.sendUserDeletedEmail({
+          to: target.email,
+          name: `${target.firstName ?? ''} ${target.lastName ?? ''}`.trim(),
+        });
       }
 
       await this.prisma.user.delete({ where: { id: target.id } });
