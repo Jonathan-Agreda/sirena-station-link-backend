@@ -85,6 +85,10 @@ model User {
   urbanizationId String?
   urbanization   Urbanization? @relation(fields: [urbanizationId], references: [id], onDelete: SetNull)
 
+  // 👇 CAMPOS AÑADIDOS PARA EL RESETEO DE CONTRASEÑA
+  passwordResetToken   String?   @unique
+  passwordResetExpires DateTime?
+
   // Relaciones
   sessions       UserSession[]
   assignments    Assignment[]

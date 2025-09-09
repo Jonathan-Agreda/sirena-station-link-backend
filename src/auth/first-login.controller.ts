@@ -5,7 +5,7 @@ import {
   Res,
   UseGuards,
   Req,
-  Logger, // 👈 Asegúrate de que este import esté
+  Logger,
 } from '@nestjs/common';
 import type { Response, Request } from 'express';
 import { FirstLoginService } from './first-login.service';
@@ -14,10 +14,11 @@ import { ConfigService } from '@nestjs/config';
 import { ChangePasswordWebDto } from './dto/change-password.dto';
 import { AuthGuard } from './auth.guard';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Controller('auth')
 export class FirstLoginController {
-  private readonly logger = new Logger(FirstLoginController.name); // 👈 Añadido para logs
+  private readonly logger = new Logger(FirstLoginController.name);
 
   constructor(
     private readonly svc: FirstLoginService,
@@ -100,6 +101,18 @@ export class FirstLoginController {
     return {
       message:
         'Si el correo electrónico está registrado, recibirás un enlace para restablecer tu contraseña.',
+    };
+  }
+
+  // 👇 NUEVO ENDPOINT AÑADIDO
+  @Post('reset-password')
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    this.logger.log(
+      `[Reset Password] Endpoint recibido para el token: ${dto.token.substring(0, 10)}...`,
+    );
+    await this.svc.resetPasswordWithToken(dto.token, dto.newPassword);
+    return {
+      message: 'Tu contraseña ha sido actualizada exitosamente.',
     };
   }
 }

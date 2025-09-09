@@ -3,12 +3,14 @@ import {
   UnauthorizedException,
   NotFoundException,
   Logger,
+  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../data/prisma.service';
 import { KeycloakAdminService } from './keycloak-admin.service';
+import { randomBytes } from 'crypto';
 
 type TokenResponse = {
   access_token: string;
@@ -29,7 +31,6 @@ export class FirstLoginService {
     private readonly kcAdmin: KeycloakAdminService,
   ) {}
 
-  // ---- Helpers de configuración
   private get base(): string {
     const u =
       this.cfg.get<string>('KEYCLOAK_BASE_URL') ?? 'http://localhost:8080';
@@ -56,7 +57,6 @@ export class FirstLoginService {
     return s;
   }
 
-  // ---- Password grant contra Keycloak (para probar login)
   private async passwordGrant(
     username: string,
     password: string,
@@ -82,13 +82,11 @@ export class FirstLoginService {
     return data;
   }
 
-  // ---- Detecta si el error de KC es "required actions / update password"
   private isPasswordChangeRequired(e: any): boolean {
     const status = e?.response?.status ?? 400;
     return status === 400;
   }
 
-  // ---- Token de service-account (client_credentials) para Admin API
   private async adminToken(): Promise<string> {
     const url = `${this.base}/realms/${this.realm}/protocol/openid-connect/token`;
     const body = new URLSearchParams({
@@ -102,7 +100,6 @@ export class FirstLoginService {
     return data.access_token;
   }
 
-  // ---- Buscar usuario en KC por username o email
   private async findUserId(usernameOrEmail: string): Promise<string> {
     const token = await this.adminToken();
     const searchUrl = `${this.base}/admin/realms/${
@@ -126,7 +123,6 @@ export class FirstLoginService {
     return found.id;
   }
 
-  // ---- Obtener username/email por ID (cuando el token no trae preferred_username)
   private async getUserUsernameById(
     userId: string,
   ): Promise<{ username?: string; email?: string }> {
@@ -138,20 +134,17 @@ export class FirstLoginService {
     return { username: data?.username, email: data?.email };
   }
 
-  // ---- Reset password permanente y limpia required actions
   private async setPermanentPassword(
     userId: string,
     newPassword: string,
   ): Promise<void> {
     const token = await this.adminToken();
-
     const resetUrl = `${this.base}/admin/realms/${this.realm}/users/${userId}/reset-password`;
     await axios.put(
       resetUrl,
       { type: 'password', value: newPassword, temporary: false },
       { headers: { Authorization: `Bearer ${token}` } },
     );
-
     const userUrl = `${this.base}/admin/realms/${this.realm}/users/${userId}`;
     await axios.put(
       userUrl,
@@ -160,7 +153,6 @@ export class FirstLoginService {
     );
   }
 
-  // === API pública (existente) ===
   async prelogin(usernameOrEmail: string, password: string) {
     try {
       await this.passwordGrant(usernameOrEmail, password);
@@ -176,41 +168,95 @@ export class FirstLoginService {
     }
   }
 
+  // 👇 MÉTODO MODIFICADO
   async sendForgotPasswordLink(email: string): Promise<void> {
-    this.log.debug(
-      `[Forgot Password] El servicio ha sido invocado para el email: ${email}`,
-    );
+    this.log.debug(`[Forgot Password] Solicitud para el email: ${email}`);
     const user = await this.prisma.user.findUnique({ where: { email } });
 
-    if (user && user.keycloakId) {
+    if (user) {
       this.log.debug(
-        `[Forgot Password] Usuario encontrado en DB. ID de Keycloak: ${user.keycloakId}`,
+        `[Forgot Password] Usuario encontrado en DB. ID: ${user.id}`,
       );
-      try {
-        await this.kcAdmin.sendForgotPasswordEmail(user.keycloakId);
-        this.log.debug(
-          `[Forgot Password] La llamada a Keycloak para enviar el email a ${user.keycloakId} fue exitosa.`,
-        );
 
-        await this.mailService.sendForgotPasswordEmail({
-          to: user.email,
-          name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
-          resetUrl: '', // Se deja vacío a propósito. El enlace real lo envía Keycloak.
-        });
-        this.log.debug(
-          `[Forgot Password] Correo de notificación (plantilla interna) enviado a ${user.email}`,
-        );
-      } catch (error) {
-        this.log.error(
-          `[Forgot Password] FALLÓ la llamada a Keycloak para el email ${email}. Error:`,
-          error,
-        );
-      }
+      const token = randomBytes(32).toString('hex');
+      const expires = new Date(Date.now() + 3600000); // 1 hora de validez
+
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordResetToken: token,
+          passwordResetExpires: expires,
+        },
+      });
+      this.log.debug(
+        `[Forgot Password] Token de reseteo generado y guardado para el usuario ${user.id}`,
+      );
+
+      const resetUrl = `${this.cfg.get('APP_LOGIN_URL').replace('/login', '')}/reset-password?token=${token}`;
+
+      await this.mailService.sendForgotPasswordEmail({
+        to: user.email,
+        name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+        resetUrl: resetUrl,
+      });
+      this.log.debug(
+        `[Forgot Password] Email enviado a ${user.email} con la URL de reseteo.`,
+      );
     } else {
       this.log.warn(
-        `[Forgot Password] Se solicitó reseteo, pero el email no fue encontrado o no tiene un ID de Keycloak asociado en la DB: ${email}`,
+        `[Forgot Password] Se solicitó reseteo para un email no registrado: ${email}`,
       );
     }
+  }
+
+  // 👇 NUEVO MÉTODO AÑADIDO
+  async resetPasswordWithToken(
+    token: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { passwordResetToken: token },
+    });
+
+    if (
+      !user ||
+      !user.passwordResetExpires ||
+      user.passwordResetExpires < new Date()
+    ) {
+      this.log.warn(
+        `[Reset Password] Se intentó usar un token inválido o expirado: ${token.substring(0, 10)}...`,
+      );
+      throw new BadRequestException(
+        'El token de restablecimiento es inválido o ha expirado.',
+      );
+    }
+
+    if (!user.keycloakId) {
+      this.log.error(
+        `[Reset Password] El usuario ${user.id} tiene un token válido pero no un keycloakId.`,
+      );
+      throw new BadRequestException(
+        'La cuenta no está vinculada a un proveedor de identidad.',
+      );
+    }
+
+    this.log.debug(
+      `[Reset Password] Token válido para el usuario ${user.id}. Actualizando contraseña en Keycloak.`,
+    );
+
+    await this.setPermanentPassword(user.keycloakId, newPassword);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetToken: null,
+        passwordResetExpires: null,
+      },
+    });
+
+    this.log.debug(
+      `[Reset Password] Contraseña actualizada y token limpiado para el usuario ${user.id}.`,
+    );
   }
 
   async completeFirstLogin(
@@ -246,9 +292,8 @@ export class FirstLoginService {
     return tokens;
   }
 
-  // === API pública (NUEVO): cambio manual para usuario autenticado WEB ===
   async changePasswordForAuthenticatedUser(
-    kcUser: any, // viene del token validado por tu AuthGuard
+    kcUser: any,
     currentPassword: string,
     newPassword: string,
   ): Promise<void> {
