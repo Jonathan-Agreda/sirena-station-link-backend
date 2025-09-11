@@ -1,3 +1,4 @@
+// src/sirens/sirens.controller.ts
 import {
   Controller,
   Get,
@@ -11,14 +12,13 @@ import {
   UploadedFile,
   Query,
   BadRequestException,
-  Header,
   UseInterceptors,
+  StreamableFile,
 } from '@nestjs/common';
 import { SirensService } from './sirens.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
-import { Role } from '@prisma/client';
 import type { Request, Express } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 
@@ -110,12 +110,11 @@ export class SirensController {
   // 🚀 TEMPLATE (Excel ejemplo)
   @Get('bulk/template')
   @Roles('SUPERADMIN')
-  @Header(
-    'Content-Type',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  )
-  @Header('Content-Disposition', 'attachment; filename="sirens_template.xlsx"')
-  async sirensTemplate() {
-    return this.svc.buildSirensTemplate();
+  async sirensTemplate(): Promise<StreamableFile> {
+    const buf = await this.svc.buildSirensTemplate();
+    return new StreamableFile(buf, {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      disposition: 'attachment; filename="sirens_template.xlsx"',
+    });
   }
 }
