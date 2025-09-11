@@ -1,3 +1,4 @@
+// src/urbanizations/urbanizations.controller.ts
 import {
   Controller,
   Get,
@@ -11,15 +12,14 @@ import {
   UploadedFile,
   Query,
   BadRequestException,
-  Header,
   UseInterceptors,
+  StreamableFile,
 } from '@nestjs/common';
 import { UrbanizationsService } from './urbanizations.service';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { AuthGuard } from '../auth/auth.guard';
-import { Role } from '@prisma/client';
-import type { Request, Express } from 'express'; // ✅ usar `import type` por isolatedModules
+import type { Request, Express } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('urbanizations')
@@ -117,15 +117,11 @@ export class UrbanizationsController {
   // 🚀 TEMPLATE (descarga ejemplo .xlsx)
   @Get('bulk/template')
   @Roles('SUPERADMIN')
-  @Header(
-    'Content-Type',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  )
-  @Header(
-    'Content-Disposition',
-    'attachment; filename="urbanizations_template.xlsx"',
-  )
-  async urbTemplate() {
-    return this.svc.buildUrbanizationsTemplate();
+  async urbTemplate(): Promise<StreamableFile> {
+    const buf = await this.svc.buildUrbanizationsTemplate();
+    return new StreamableFile(buf, {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      disposition: 'attachment; filename="urbanizations_template.xlsx"',
+    });
   }
 }
