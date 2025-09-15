@@ -4,13 +4,13 @@ import { ConfigService } from '@nestjs/config';
 import { TelegramService } from './telegram.service';
 import { DataModule } from 'src/data/data.module';
 import { UsersModule } from 'src/users/users.module';
+import { TelegramController } from './telegram.controller'; // <-- Importamos el controlador
 
 @Module({
   imports: [
     TelegrafModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
-        // --- INICIO CORRECCIÓN 1 y 2 ---
         const token = configService.get<string>('TELEGRAM_BOT_TOKEN');
         const webhookUrl = configService.get<string>('TELEGRAM_WEBHOOK_URL');
 
@@ -34,12 +34,12 @@ import { UsersModule } from 'src/users/users.module';
             path: '/api/telegram/webhook',
           },
         };
-        // --- FIN CORRECCIÓN 1 y 2 ---
       },
     }),
     DataModule,
     UsersModule,
   ],
+  controllers: [TelegramController], // <-- Añadimos el controlador
   providers: [TelegramService],
   exports: [TelegramService],
 })

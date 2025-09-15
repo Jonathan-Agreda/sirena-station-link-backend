@@ -8,20 +8,20 @@ import { Context, Telegraf } from 'telegraf';
 export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
 
+  // Hacemos 'bot' público y 'readonly' para que el controller pueda usarlo
   constructor(
-    @InjectBot() private readonly bot: Telegraf<Context>,
+    @InjectBot() public readonly bot: Telegraf<Context>,
     private readonly prisma: PrismaService,
   ) {}
 
   @Start()
   async handleStart(@Ctx() ctx: Context) {
-    // --- INICIO CORRECCIÓN 3 ---
+    // Validar ctx.chat
     if (!ctx.chat) {
       this.logger.warn('Comando /start recibido sin contexto de chat.');
       return; // Salir si no hay chat
     }
     const chatId = String(ctx.chat.id);
-    // --- FIN CORRECCIÓN 3 ---
 
     const payload = (ctx as any).startPayload;
 
@@ -44,7 +44,6 @@ export class TelegramService {
         data: { telegramChatId: chatId },
       });
 
-      // --- INICIO CORRECCIÓN 4 ---
       // Formamos el nombre como indicaste
       const userName = [user.firstName, user.lastName]
         .filter(Boolean)
@@ -55,7 +54,6 @@ export class TelegramService {
         // Usamos userName, con un fallback al email si no tuviera nombres
         `¡Hola ${userName || user.email}! Tu cuenta de SirenaStation ha sido vinculada correctamente. A partir de ahora recibirás notificaciones aquí.`,
       );
-      // --- FIN CORRECCIÓN 4 ---
     } catch (error) {
       this.logger.error(
         `Error al vincular cuenta (Payload: ${payload}):`,
