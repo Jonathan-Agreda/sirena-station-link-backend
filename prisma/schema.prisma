@@ -49,6 +49,7 @@ model Urbanization {
   id         String   @id @default(uuid())
   name       String   @unique
   maxUsers   Int?     // Solo SUPERADMIN podrá cambiar esto (lógica en servicio)
+  telegramGroupId   String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -88,6 +89,7 @@ model User {
   // 👇 CAMPOS AÑADIDOS PARA EL RESETEO DE CONTRASEÑA
   passwordResetToken   String?   @unique
   passwordResetExpires DateTime?
+  telegramChatId    String?    @unique
 
   // Relaciones
   sessions       UserSession[]

@@ -17,6 +17,7 @@ import { ActivationLogsModule } from './activation-logs/activation-logs.module';
 import { AssignmentsModule } from './assignments/assignments.module'; // 👈 importar módulo
 import { ResidentsModule } from './residents/residents.module';
 import { MailModule } from './mail/mail.module';
+import { TelegramModule } from './telegram/telegram.module';
 
 @Module({
   imports: [
@@ -37,7 +38,8 @@ import { MailModule } from './mail/mail.module';
     ActivationLogsModule,
     AssignmentsModule,
     ResidentsModule,
-    MailModule, // 👈 registrar aquí
+    MailModule,
+    TelegramModule, // 👈 registrar aquí
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
