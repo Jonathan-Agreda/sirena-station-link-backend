@@ -35,12 +35,16 @@ export class TelegramService {
     }
 
     this.logger.log(
-      `Intentando vincular ChatID ${chatId} con UsuarioID ${payload}`,
+      `Intentando vincular ChatID ${chatId} con UsuarioID (Keycloak) ${payload}`,
     );
 
     try {
       const user = await this.prisma.user.update({
-        where: { id: payload },
+        // --- INICIO CORRECCIÓN ---
+        // Buscamos por el 'keycloakId' (que es el payload)
+        // en lugar del 'id' de la base de datos.
+        where: { keycloakId: payload },
+        // --- FIN CORRECCIÓN ---
         data: { telegramChatId: chatId },
       });
 
