@@ -65,6 +65,7 @@ export class ResidentsController {
       sirens,
       cedula: user.cedula,
       celular: user.celular,
+      telegramChatId: user.telegramChatId,
     };
   }
 
