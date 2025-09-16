@@ -3,35 +3,50 @@ import { PrismaService } from 'src/data/prisma.service';
 import { InjectBot, Start, Ctx, Update } from 'nestjs-telegraf';
 import { Context, Telegraf } from 'telegraf';
 
+type StartCtx = Context & { startPayload?: string }; // <- tipado sin any
+
 @Update()
 @Injectable()
 export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
 
-  // Hacemos 'bot' público y 'readonly' para que el controller pueda usarlo
   constructor(
     @InjectBot() public readonly bot: Telegraf<Context>,
     private readonly prisma: PrismaService,
   ) {}
 
   @Start()
-  async handleStart(@Ctx() ctx: Context) {
-    // Validar ctx.chat
+  async handleStart(@Ctx() ctx: StartCtx) {
     if (!ctx.chat) {
       this.logger.warn('Comando /start recibido sin contexto de chat.');
-      return; // Salir si no hay chat
+      return;
     }
     const chatId = String(ctx.chat.id);
 
-    const payload = (ctx as any).startPayload;
+    const payload = ctx.startPayload;
 
     if (!payload) {
       this.logger.warn(
         `Comando /start recibido sin payload. ChatID: ${chatId}`,
       );
-      return ctx.reply(
-        'Bienvenido. Para vincular tu cuenta, por favor usa el link que se genera en la aplicación web de SirenaStation.',
-      );
+
+      // Obtenemos nombre desde el remitente (User)
+      const tgName =
+        [ctx.from?.first_name, ctx.from?.last_name]
+          .filter((v): v is string => Boolean(v))
+          .join(' ') ||
+        ctx.from?.username ||
+        ('title' in ctx.chat ? ctx.chat.title : 'usuario');
+
+      const text =
+        `¡Bienvenido ${tgName}!!! Para vincular tu cuenta, por favor genera el link desde la aplicación web de SirenaStationLink.\n\n` +
+        'Puedes iniciar sesión aquí: <a href="https://sirenastationlink.disxor.com/login">sirenastationlink.disxor.com/login</a>';
+
+      await ctx.reply(text, {
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+      });
+      return; // evita el [object Object]
     }
 
     this.logger.log(
@@ -40,23 +55,17 @@ export class TelegramService {
 
     try {
       const user = await this.prisma.user.update({
-        // --- INICIO CORRECCIÓN ---
-        // Buscamos por el 'keycloakId' (que es el payload)
-        // en lugar del 'id' de la base de datos.
         where: { keycloakId: payload },
-        // --- FIN CORRECCIÓN ---
         data: { telegramChatId: chatId },
       });
 
-      // Formamos el nombre como indicaste
       const userName = [user.firstName, user.lastName]
         .filter(Boolean)
         .join(' ');
 
       this.logger.log(`¡Éxito! Usuario ${user.email} vinculado.`);
       await ctx.reply(
-        // Usamos userName, con un fallback al email si no tuviera nombres
-        `¡Hola ${userName || user.email}! Tu cuenta de SirenaStation ha sido vinculada correctamente. A partir de ahora recibirás notificaciones aquí.`,
+        `¡Hola ${userName || user.email}! Tu cuenta de SirenaStationLink ha sido vinculada correctamente. A partir de ahora recibirás notificaciones aquí.`,
       );
     } catch (error) {
       this.logger.error(
