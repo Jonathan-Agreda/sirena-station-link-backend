@@ -131,7 +131,7 @@ export class TelegramService {
         s.relay === 'ON'
           ? '🚨 <b>SIRENA ACTIVADA</b>'
           : '✅ <b>SIRENA DESACTIVADA</b>';
-      return `<b>${s.deviceId}</b> (${s.urbanizationName}): ${online} · ${relay}`;
+      return `Sirena: <b>${s.deviceId}</b> (${s.urbanizationName}) -Estado: ${online} · ${relay}`;
     });
 
     await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });

@@ -138,8 +138,7 @@ export class SirensService {
 
   // ========== ESTADO DE SIRENAS PARA TELEGRAM ==========
   /**
-   * Obtiene el estado de las sirenas según el rol del usuario.
-   * Retorna un array de objetos con deviceId, online, relay y nombre de urbanización.
+   * Obtiene el estado real de las sirenas asociadas al usuario, consultando SirenState.
    */
   async getSirensStateForUser(user: {
     id: string;
@@ -148,7 +147,8 @@ export class SirensService {
     userId?: string;
     roles?: Role[] | string[];
   }): Promise<SirenState[]> {
-    let sirens: Array<any> = [];
+    let sirens: Array<{ deviceId: string; urbanization: { name: string } }> =
+      [];
 
     // Determina el rol correctamente
     const role =
@@ -169,7 +169,6 @@ export class SirensService {
         include: { urbanization: true },
       });
     } else if (role === 'RESIDENTE') {
-      // Busca las sirenas asignadas al residente
       const assignments = await this.prisma.assignment.findMany({
         where: { userId: user.id ?? user.userId, active: true },
         include: { siren: { include: { urbanization: true } } },
@@ -178,15 +177,23 @@ export class SirensService {
     }
     if (!sirens.length) return [];
 
-    // Mapear solo los campos relevantes y tipar correctamente
-    return sirens.map(
-      (s): SirenState => ({
+    // Consulta el estado real desde SirenState
+    const states = await this.prisma.sirenState.findMany({
+      where: {
+        deviceId: { in: sirens.map((s) => s.deviceId) },
+      },
+    });
+
+    // Mapear y unir datos
+    return sirens.map((s) => {
+      const state = states.find((st) => st.deviceId === s.deviceId);
+      return {
         deviceId: s.deviceId,
-        online: Boolean(s.online),
-        relay: s.relay as SwitchState,
+        online: state?.online ?? false,
+        relay: state?.relay ?? 'OFF',
         urbanizationName: s.urbanization?.name ?? '',
-      }),
-    );
+      };
+    });
   }
 
   // ========== 📦 Bulk Excel helpers ==========

@@ -126,6 +126,8 @@ model Siren {
   residents      Assignment[]
   logs           ActivationLog[]
 
+  state          SirenState?
+
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -216,4 +218,16 @@ model AuditLog {
 
   @@index([userId, createdAt])
   @@index([action, createdAt])
+}
+
+model SirenState {
+  id        String      @id @default(uuid())
+  deviceId  String      @unique
+  online    Boolean
+  relay     SwitchState
+  ip        String?
+  lastSeen  DateTime?
+  updatedAt DateTime    @updatedAt
+
+  siren     Siren       @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
 }

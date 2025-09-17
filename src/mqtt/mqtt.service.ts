@@ -21,6 +21,7 @@ import { ActivationLogService } from '../devices/activation-log.service';
 import { ActivationAction, ActivationResult } from '@prisma/client';
 import { DevicesService } from '../devices/devices.service';
 import { WsGateway } from '../ws/ws.gateway';
+import { PrismaService } from '../data/prisma.service';
 
 @Injectable()
 export class MqttService implements OnModuleInit, OnModuleDestroy {
@@ -35,6 +36,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     private readonly activationLog: ActivationLogService,
     private readonly devicesService: DevicesService,
     private readonly ws: WsGateway,
+    private readonly prisma: PrismaService, // <-- Inyecta PrismaService aquí
   ) {}
 
   onModuleInit() {
@@ -157,6 +159,26 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
         this.lastStates.set(id, { ...(prev || state), ...state });
 
+        // --- Persistir estado actual en la BD ---
+        await this.prisma.sirenState.upsert({
+          where: { deviceId: id },
+          update: {
+            online: state.online,
+            relay: state.relay,
+            ip: state.ip,
+            lastSeen: new Date(state.updatedAt),
+            updatedAt: new Date(state.updatedAt),
+          },
+          create: {
+            deviceId: id,
+            online: state.online,
+            relay: state.relay,
+            ip: state.ip,
+            lastSeen: new Date(state.updatedAt),
+            updatedAt: new Date(state.updatedAt),
+          },
+        });
+
         this.logger.debug(
           `[state] ${id} → online=${state.online} relay=${state.relay} siren=${state.siren}`,
         );
@@ -179,6 +201,27 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           lastHeartbeatAt: prev?.lastHeartbeatAt,
         };
         this.lastStates.set(id, offline);
+
+        // --- Persistir estado offline en la BD ---
+        await this.prisma.sirenState.upsert({
+          where: { deviceId: id },
+          update: {
+            online: false,
+            relay: offline.relay,
+            ip: offline.ip,
+            lastSeen: new Date(offline.updatedAt),
+            updatedAt: new Date(offline.updatedAt),
+          },
+          create: {
+            deviceId: id,
+            online: false,
+            relay: offline.relay,
+            ip: offline.ip,
+            lastSeen: new Date(offline.updatedAt),
+            updatedAt: new Date(offline.updatedAt),
+          },
+        });
+
         this.logger.warn(`[lwt] ${id} → offline`);
 
         this.ws.emitEvent('device.lwt', offline);
@@ -354,7 +397,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     return this.lastStates.get(deviceId);
   }
 
-  private safeJson<T = any>(txt: string): T | null {
+  private safeJson<T = unknown>(txt: string): T | null {
     try {
       return JSON.parse(txt) as T;
     } catch {
