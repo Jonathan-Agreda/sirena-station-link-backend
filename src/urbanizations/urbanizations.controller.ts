@@ -16,6 +16,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { UrbanizationsService } from './urbanizations.service';
+import type { UrbanizationCreateDto, UrbanizationUpdateDto } from './dto';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { AuthGuard } from '../auth/auth.guard';
@@ -32,10 +33,7 @@ export class UrbanizationsController {
   @Roles('SUPERADMIN')
   create(
     @Body()
-    body: {
-      name: string;
-      maxUsers?: number;
-    },
+    body: UrbanizationCreateDto,
   ) {
     return this.svc.create(body);
   }
@@ -62,10 +60,7 @@ export class UrbanizationsController {
   update(
     @Param('id') id: string,
     @Body()
-    body: {
-      name?: string;
-      maxUsers?: number;
-    },
+    body: UrbanizationUpdateDto,
     @Req() req: Request,
   ) {
     const user = req['user'];

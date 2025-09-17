@@ -3,7 +3,7 @@ import { PrismaService } from 'src/data/prisma.service';
 import { InjectBot, Start, Ctx, Update } from 'nestjs-telegraf';
 import { Context, Telegraf } from 'telegraf';
 
-type StartCtx = Context & { startPayload?: string }; // <- tipado sin any
+type StartCtx = Context & { startPayload?: string };
 
 @Update()
 @Injectable()
@@ -30,7 +30,6 @@ export class TelegramService {
         `Comando /start recibido sin payload. ChatID: ${chatId}`,
       );
 
-      // Obtenemos nombre desde el remitente (User)
       const tgName =
         [ctx.from?.first_name, ctx.from?.last_name]
           .filter((v): v is string => Boolean(v))
@@ -46,7 +45,7 @@ export class TelegramService {
         parse_mode: 'HTML',
         link_preview_options: { is_disabled: true },
       });
-      return; // evita el [object Object]
+      return;
     }
 
     this.logger.log(
@@ -75,6 +74,18 @@ export class TelegramService {
       await ctx.reply(
         'Hubo un error al intentar vincular tu cuenta. Asegúrate de que estás usando el link más reciente y que tu usuario es válido.',
       );
+    }
+  }
+
+  async sendToGroup(groupId: string, message: string) {
+    try {
+      await this.bot.telegram.sendMessage(groupId, message, {
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+      });
+      this.logger.log(`Notificación enviada a grupo ${groupId}: ${message}`);
+    } catch (err) {
+      this.logger.error(`Error enviando a Telegram group ${groupId}:`, err);
     }
   }
 }

@@ -25,6 +25,13 @@ export class DevicesService {
   }
 
   /**
+   * Buscar urbanización por ID (método público para controller)
+   */
+  async findUrbanizationById(id: string) {
+    return this.prisma.urbanization.findUnique({ where: { id } });
+  }
+
+  /**
    * Valida si el usuario tiene permiso para controlar una sirena
    * según su rol y pertenencia.
    */

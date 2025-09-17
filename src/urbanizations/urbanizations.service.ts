@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../data/prisma.service';
 import { Role } from '@prisma/client';
 import * as ExcelJS from 'exceljs';
+import { UrbanizationCreateDto, UrbanizationUpdateDto } from './dto';
 
 type BulkOptions = { dryRun?: boolean };
 function normalizeKey(s?: string) {
@@ -19,10 +20,8 @@ export class UrbanizationsService {
 
   async findAll(user: any) {
     if (user.roles.includes(Role.SUPERADMIN)) {
-      // SUPERADMIN → todas
       return this.prisma.urbanization.findMany();
     }
-    // ADMIN/GUARDIA/RESIDENTE → solo su urbanización
     if (!user.urbanizationId) {
       throw new ForbiddenException('No urbanization linked to user');
     }
@@ -35,7 +34,6 @@ export class UrbanizationsService {
     if (user.roles.includes(Role.SUPERADMIN)) {
       return this.prisma.urbanization.findUnique({ where: { id } });
     }
-    // ADMIN/GUARDIA/RESIDENTE → siempre la suya (ignorar id en la URL)
     if (!user.urbanizationId) {
       throw new ForbiddenException('No urbanization linked to user');
     }
@@ -44,24 +42,37 @@ export class UrbanizationsService {
     });
   }
 
-  async create(data: { name: string; maxUsers?: number }) {
-    return this.prisma.urbanization.create({ data });
+  async create(data: UrbanizationCreateDto) {
+    if (!data.name?.trim()) {
+      throw new BadRequestException('Name is required');
+    }
+    return this.prisma.urbanization.create({
+      data: {
+        name: data.name.trim(),
+        maxUsers: data.maxUsers,
+        telegramGroupId: data.telegramGroupId?.trim() || null,
+      },
+    });
   }
 
-  async update(
-    id: string,
-    data: { name?: string; maxUsers?: number },
-    user: any,
-  ) {
+  async update(id: string, data: UrbanizationUpdateDto, user: any) {
     if (!user.roles.includes(Role.SUPERADMIN) && data.maxUsers !== undefined) {
-      // ⚠️ Solo SUPERADMIN puede modificar maxUsers
       throw new ForbiddenException('Only SUPERADMIN can modify maxUsers');
     }
     if (!user.roles.includes(Role.SUPERADMIN)) {
-      // ⚠️ Solo SUPERADMIN puede actualizar urbanizaciones en general
       throw new ForbiddenException('Only SUPERADMIN can update urbanizations');
     }
-    return this.prisma.urbanization.update({ where: { id }, data });
+    if (data.name && !data.name.trim()) {
+      throw new BadRequestException('Name cannot be empty');
+    }
+    return this.prisma.urbanization.update({
+      where: { id },
+      data: {
+        name: data.name?.trim(),
+        maxUsers: data.maxUsers,
+        telegramGroupId: data.telegramGroupId?.trim() || null,
+      },
+    });
   }
 
   async remove(id: string, user: any) {
@@ -76,12 +87,10 @@ export class UrbanizationsService {
   // ========== 📦 Bulk Excel helpers ==========
   private async readSheet(buffer: Uint8Array | ArrayBuffer) {
     const wb = new ExcelJS.Workbook();
-    // ExcelJS acepta Buffer/ArrayBuffer; evitamos choque de tipos con TS usando Uint8Array/ArrayBuffer
     await wb.xlsx.load(buffer as any);
     const sheet = wb.worksheets[0];
     if (!sheet) throw new BadRequestException('Workbook has no sheets');
 
-    // Encabezados normalizados
     const headerRow = sheet.getRow(1);
     const headers: string[] = [];
     headerRow.eachCell((cell, col) => {
@@ -91,7 +100,7 @@ export class UrbanizationsService {
     const rows: Record<string, any>[] = [];
     for (let r = 2; r <= sheet.rowCount; r++) {
       const row = sheet.getRow(r);
-      if (row.getCell(1).value == null) continue; // fila vacía
+      if (row.getCell(1).value == null) continue;
       const obj: Record<string, any> = {};
       for (let c = 1; c <= headerRow.cellCount; c++) {
         const key = headers[c];
@@ -192,7 +201,7 @@ export class UrbanizationsService {
     const ws = wb.addWorksheet('urbanizations');
     ws.addRow(['name', 'maxUsers']);
     ws.addRow(['Mi Urbanización', 200]);
-    const buf = await wb.xlsx.writeBuffer(); // Uint8Array | ArrayBuffer según versión
-    return Buffer.from(buf as ArrayBuffer); // ✅ convertir a Buffer para Nest
+    const buf = await wb.xlsx.writeBuffer();
+    return Buffer.from(buf as ArrayBuffer);
   }
 }

@@ -23,6 +23,7 @@ import { ActivationLogService } from './activation-log.service';
 import { ActivationAction, ActivationResult } from '@prisma/client';
 import { DeviceCmdExceptionFilter } from './devices.exception-filter';
 import type { Request } from 'express';
+import { TelegramService } from '../telegram/telegram.service';
 
 @Controller('devices')
 @UseGuards(KeycloakGuard, RolesGuard)
@@ -32,16 +33,13 @@ export class DevicesController {
     private readonly config: ConfigService,
     private readonly devicesService: DevicesService,
     private readonly activationLog: ActivationLogService,
+    private readonly telegramService: TelegramService,
   ) {}
 
   private genCommandId(): string {
     return `cmd_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   }
 
-  /**
-   * Enviar un comando a un dispositivo
-   * ADMIN, SUPERADMIN, GUARDIA, RESIDENTE
-   */
   @Post(':deviceId/cmd')
   @Roles('ADMIN', 'SUPERADMIN', 'GUARDIA', 'RESIDENTE')
   @UseFilters(DeviceCmdExceptionFilter)
@@ -53,7 +51,6 @@ export class DevicesController {
     const kcUser: any = (req as any).user;
 
     try {
-      // validar acceso
       await this.devicesService.validateAccess(kcUser, deviceId);
 
       const defaultTtl =
@@ -75,7 +72,6 @@ export class DevicesController {
         cause: dto.cause ?? 'manual',
       };
 
-      // 👉 Publicar al broker
       await this.mqtt.publishCommand(deviceId, payload);
 
       const siren = await this.devicesService.findByDeviceId(deviceId);
@@ -83,7 +79,6 @@ export class DevicesController {
         throw new NotFoundException(`Sirena ${deviceId} no encontrada`);
       }
 
-      // 📝 Log ACCEPTED (el ACK real se guardará en mqtt.service como EXECUTED)
       await this.activationLog.record({
         sirenId: siren.id,
         userId: kcUser.dbId ?? kcUser.sub,
@@ -93,12 +88,40 @@ export class DevicesController {
         ip: req.ip,
       });
 
+      // --- ENVIAR NOTIFICACIÓN A TELEGRAM ---
+      const urbanization = await this.devicesService.findUrbanizationById(
+        siren.urbanizationId,
+      );
+      if (urbanization?.telegramGroupId) {
+        // Obtener datos completos del usuario
+        let user = kcUser;
+        if (!user.firstName || !user.lastName || !user.username) {
+          const dbUser = await this.devicesService.findUserByKeycloakId(
+            kcUser.sub,
+          );
+          if (dbUser) user = dbUser;
+        }
+        const fullName = [user.firstName, user.lastName]
+          .filter(Boolean)
+          .join(' ');
+        const username = user.username ? `(@${user.username})` : '';
+        const actionText =
+          dto.action === 'ON' ? '🚨 <b>ACTIVADA</b>' : '✅ <b>DESACTIVADA</b>';
+        const msg =
+          `${dto.action === 'ON' ? '🚨' : '✅'} Sirena <b>${siren.deviceId}</b> ${actionText}
+<b>Usuario:</b> ${fullName || username} ${username}`.trim();
+
+        await this.telegramService.sendToGroup(
+          urbanization.telegramGroupId,
+          msg,
+        );
+      }
+
       return { message: `Comando enviado a ${deviceId}`, payload };
     } catch (err: any) {
       try {
         const siren = await this.devicesService.findByDeviceId(deviceId);
 
-        // 🔹 resolver userId seguro
         let userId: string | null = null;
         if (kcUser?.dbId) {
           userId = kcUser.dbId;
@@ -109,7 +132,6 @@ export class DevicesController {
           userId = dbUser?.id ?? null;
         }
 
-        // ❌ Log de rechazo
         await this.activationLog.record({
           sirenId: siren?.id ?? deviceId,
           userId,
