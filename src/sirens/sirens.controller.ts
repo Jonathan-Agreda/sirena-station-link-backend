@@ -1,4 +1,3 @@
-// src/sirens/sirens.controller.ts
 import {
   Controller,
   Get,
@@ -14,6 +13,7 @@ import {
   BadRequestException,
   UseInterceptors,
   StreamableFile,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { SirensService } from './sirens.service';
 import { AuthGuard } from '../auth/auth.guard';
@@ -21,6 +21,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { Request, Express } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Role } from '@prisma/client';
 
 @Controller('sirens')
 @UseGuards(AuthGuard, RolesGuard)
@@ -34,14 +35,43 @@ export class SirensController {
   @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findAll(@Req() req: Request) {
     const user = req['user'];
-    return this.svc.findAll(user);
+    if (!user) {
+      throw new UnauthorizedException('No user in request');
+    }
+
+    // 👇 Convertimos roles y normalizamos valores nulos
+    const mappedUser: {
+      roles: Role[];
+      urbanizationId?: string;
+      userId?: string;
+    } = {
+      roles: (user.roles || []).map((r: string) => r as Role),
+      urbanizationId: user.urbanizationId ?? undefined,
+      userId: user.userId ?? undefined,
+    };
+
+    return this.svc.findAll(mappedUser);
   }
 
   @Get(':id')
   @Roles('SUPERADMIN', 'ADMIN', 'GUARDIA', 'RESIDENTE')
   findOne(@Param('id') id: string, @Req() req: Request) {
     const user = req['user'];
-    return this.svc.findOne(id, user);
+    if (!user) {
+      throw new UnauthorizedException('No user in request');
+    }
+
+    const mappedUser: {
+      roles: Role[];
+      urbanizationId?: string;
+      userId?: string;
+    } = {
+      roles: (user.roles || []).map((r: string) => r as Role),
+      urbanizationId: user.urbanizationId ?? undefined,
+      userId: user.userId ?? undefined,
+    };
+
+    return this.svc.findOne(id, mappedUser);
   }
 
   @Post()

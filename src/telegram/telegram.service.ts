@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/data/prisma.service';
-import { InjectBot, Start, Ctx, Update } from 'nestjs-telegraf';
+import { InjectBot, Start, Ctx, Update, Command } from 'nestjs-telegraf';
 import { Context, Telegraf } from 'telegraf';
+import { SirensService, SirenState } from '../sirens/sirens.service';
 
 type StartCtx = Context & { startPayload?: string };
 
@@ -13,6 +14,7 @@ export class TelegramService {
   constructor(
     @InjectBot() public readonly bot: Telegraf<Context>,
     private readonly prisma: PrismaService,
+    private readonly sirensService: SirensService, // Inyecta el servicio de sirenas
   ) {}
 
   @Start()
@@ -87,5 +89,51 @@ export class TelegramService {
     } catch (err) {
       this.logger.error(`Error enviando a Telegram group ${groupId}:`, err);
     }
+  }
+
+  @Command('state')
+  async handleState(@Ctx() ctx: Context) {
+    const chatId = String(ctx.chat?.id ?? '');
+    if (!chatId) return;
+
+    // 1. Buscar usuario por telegramChatId
+    const user = await this.prisma.user.findFirst({
+      where: { telegramChatId: chatId },
+    });
+
+    if (!user) {
+      await ctx.reply(
+        'No tienes una cuenta vinculada. Usa /start para vincular.',
+      );
+      return;
+    }
+
+    // 2. Obtener estados de sirenas según el rol
+    const sirens: SirenState[] = await this.sirensService.getSirensStateForUser(
+      {
+        id: user.id,
+        role: user.role,
+        urbanizationId: user.urbanizationId ?? null,
+        userId: user.id,
+        roles: [user.role],
+      },
+    );
+
+    if (!sirens.length) {
+      await ctx.reply('No tienes sirenas asociadas.');
+      return;
+    }
+
+    // 3. Formatear respuesta con emojis y HTML
+    const lines = sirens.map((s) => {
+      const online = s.online ? '🟢 Online' : '🔴 Offline';
+      const relay =
+        s.relay === 'ON'
+          ? '🚨 <b>SIRENA ACTIVADA</b>'
+          : '✅ <b>SIRENA DESACTIVADA</b>';
+      return `<b>${s.deviceId}</b> (${s.urbanizationName}): ${online} · ${relay}`;
+    });
+
+    await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
   }
 }

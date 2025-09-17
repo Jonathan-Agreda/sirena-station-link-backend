@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { TelegramService } from './telegram.service';
 import { DataModule } from 'src/data/data.module';
 import { UsersModule } from 'src/users/users.module';
+import { SirensService } from '../sirens/sirens.service';
 import { TelegramController } from './telegram.controller'; // <-- Importamos el controlador
 
 @Module({
@@ -40,7 +41,7 @@ import { TelegramController } from './telegram.controller'; // <-- Importamos el
     UsersModule,
   ],
   controllers: [TelegramController], // <-- Añadimos el controlador
-  providers: [TelegramService],
+  providers: [TelegramService, SirensService],
   exports: [TelegramService],
 })
 export class TelegramModule {}

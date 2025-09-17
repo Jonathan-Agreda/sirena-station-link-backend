@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../data/prisma.service';
-import { Role } from '@prisma/client';
+import { Role, SwitchState } from '@prisma/client';
 import * as ExcelJS from 'exceljs';
 
 type BulkOptions = { dryRun?: boolean };
@@ -13,12 +13,24 @@ function normalizeKey(s?: string) {
   return (s || '').toString().trim().toLowerCase().replace(/\s+/g, '');
 }
 
+// Tipado estricto para el estado de sirena
+export type SirenState = {
+  deviceId: string;
+  online: boolean;
+  relay: SwitchState;
+  urbanizationName: string;
+};
+
 @Injectable()
 export class SirensService {
   constructor(private prisma: PrismaService) {}
 
   // 🔎 Listar sirenas según el rol
-  async findAll(user: any) {
+  async findAll(user: {
+    roles: Role[];
+    urbanizationId?: string;
+    userId?: string;
+  }) {
     if (user.roles.includes(Role.SUPERADMIN)) {
       return this.prisma.siren.findMany({
         include: { urbanization: true },
@@ -39,24 +51,25 @@ export class SirensService {
       if (!user.userId) {
         throw new ForbiddenException('No local user linked to token');
       }
-      return this.prisma.siren.findMany({
+      // Busca las sirenas asignadas al residente
+      const assignments = await this.prisma.assignment.findMany({
         where: {
-          residents: {
-            some: {
-              userId: user.userId,
-              active: true,
-            },
-          },
+          userId: user.userId,
+          active: true,
         },
-        include: { urbanization: true },
+        include: { siren: { include: { urbanization: true } } },
       });
+      return assignments.map((a) => a.siren);
     }
 
     throw new ForbiddenException('Role not allowed');
   }
 
   // 🔎 Obtener sirena por ID
-  async findOne(id: string, user: any) {
+  async findOne(
+    id: string,
+    user: { roles: Role[]; urbanizationId?: string; userId?: string },
+  ) {
     const siren = await this.prisma.siren.findUnique({
       where: { id },
       include: { urbanization: true, residents: true },
@@ -121,6 +134,59 @@ export class SirensService {
     const siren = await this.prisma.siren.findUnique({ where: { id } });
     if (!siren) throw new NotFoundException('Siren not found');
     return this.prisma.siren.delete({ where: { id } });
+  }
+
+  // ========== ESTADO DE SIRENAS PARA TELEGRAM ==========
+  /**
+   * Obtiene el estado de las sirenas según el rol del usuario.
+   * Retorna un array de objetos con deviceId, online, relay y nombre de urbanización.
+   */
+  async getSirensStateForUser(user: {
+    id: string;
+    role: Role | string;
+    urbanizationId?: string | null;
+    userId?: string;
+    roles?: Role[] | string[];
+  }): Promise<SirenState[]> {
+    let sirens: Array<any> = [];
+
+    // Determina el rol correctamente
+    const role =
+      typeof user.role === 'string'
+        ? user.role
+        : Array.isArray(user.roles) && user.roles.length
+          ? String(user.roles[0])
+          : '';
+
+    if (role === 'SUPERADMIN') {
+      sirens = await this.prisma.siren.findMany({
+        include: { urbanization: true },
+      });
+    } else if (role === 'ADMIN' || role === 'GUARDIA') {
+      if (!user.urbanizationId) return [];
+      sirens = await this.prisma.siren.findMany({
+        where: { urbanizationId: user.urbanizationId },
+        include: { urbanization: true },
+      });
+    } else if (role === 'RESIDENTE') {
+      // Busca las sirenas asignadas al residente
+      const assignments = await this.prisma.assignment.findMany({
+        where: { userId: user.id ?? user.userId, active: true },
+        include: { siren: { include: { urbanization: true } } },
+      });
+      sirens = assignments.map((a) => a.siren);
+    }
+    if (!sirens.length) return [];
+
+    // Mapear solo los campos relevantes y tipar correctamente
+    return sirens.map(
+      (s): SirenState => ({
+        deviceId: s.deviceId,
+        online: Boolean(s.online),
+        relay: s.relay as SwitchState,
+        urbanizationName: s.urbanization?.name ?? '',
+      }),
+    );
   }
 
   // ========== 📦 Bulk Excel helpers ==========
