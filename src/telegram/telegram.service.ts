@@ -91,6 +91,75 @@ export class TelegramService {
     }
   }
 
+  /**
+   * Envía un mensaje a todos los grupos y usuarios que aceptaron notificaciones por Telegram
+   */
+  async notifyAllGroupsAndUsers(message: string) {
+    // Notifica a todos los grupos con telegramGroupId
+    const groups = await this.prisma.urbanization.findMany({
+      where: { telegramGroupId: { not: null } },
+      select: { telegramGroupId: true },
+    });
+    for (const g of groups) {
+      if (g.telegramGroupId) {
+        await this.sendToGroup(g.telegramGroupId, message);
+      }
+    }
+    // Notifica a usuarios individuales con telegramChatId
+    const users = await this.prisma.user.findMany({
+      where: { telegramChatId: { not: null } },
+      select: { telegramChatId: true },
+    });
+    for (const u of users) {
+      if (u.telegramChatId) {
+        await this.sendToGroup(u.telegramChatId, message);
+      }
+    }
+    this.logger.log('Notificación masiva enviada a grupos y usuarios.');
+  }
+
+  @Command('update')
+  async handleUpdate(@Ctx() ctx: Context) {
+    const chatId = String(ctx.chat?.id ?? '');
+    if (!chatId) return;
+    // Buscar usuario y validar rol
+    const user = await this.prisma.user.findFirst({
+      where: { telegramChatId: chatId },
+    });
+    if (!user || user.role !== 'SUPERADMIN') {
+      await ctx.reply('Solo SUPERADMIN puede ejecutar este comando.');
+      return;
+    }
+    const message =
+      '🚧 <b>SirenaStationLink está siendo actualizado.</b>\n' +
+      'Es posible que experimentes intermitencias o funciones limitadas temporalmente.\n' +
+      'Nuestro equipo está trabajando de manera oportuna y coordinada para brindarte la mejor experiencia.\n' +
+      'Pedimos disculpas por las molestias y agradecemos tu comprensión.';
+    await this.notifyAllGroupsAndUsers(message);
+    await ctx.reply('Notificación enviada a todos los grupos y usuarios.');
+  }
+
+  @Command('ready')
+  async handleReady(@Ctx() ctx: Context) {
+    const chatId = String(ctx.chat?.id ?? '');
+    if (!chatId) return;
+    // Buscar usuario y validar rol
+    const user = await this.prisma.user.findFirst({
+      where: { telegramChatId: chatId },
+    });
+    if (!user || user.role !== 'SUPERADMIN') {
+      await ctx.reply('Solo SUPERADMIN puede ejecutar este comando.');
+      return;
+    }
+    const message =
+      '✅ <b>SirenaStationLink ha sido actualizado exitosamente.</b>\n' +
+      'El sistema está nuevamente disponible para su uso.\n' +
+      '¡Gracias por tu paciencia!\n' +
+      'Seguimos comprometidos en brindarte la mejor experiencia.';
+    await this.notifyAllGroupsAndUsers(message);
+    await ctx.reply('Notificación enviada a todos los grupos y usuarios.');
+  }
+
   @Command('state')
   async handleState(@Ctx() ctx: Context) {
     const chatId = String(ctx.chat?.id ?? '');
