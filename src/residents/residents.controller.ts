@@ -8,6 +8,7 @@ import {
   BadRequestException,
   NotFoundException,
   InternalServerErrorException,
+  Delete,
 } from '@nestjs/common';
 import { PrismaService } from '../data/prisma.service';
 import { AuthGuard } from '../auth/auth.guard';
@@ -141,5 +142,26 @@ export class ResidentsController {
     }
 
     return { ok: true, user: updated };
+  }
+
+  /* ----------- Desactivar notificaciones de Telegram ----------- */
+  @Delete('me/telegram')
+  @Roles('RESIDENTE', 'ADMIN', 'GUARDIA', 'SUPERADMIN')
+  async unlinkTelegram(@Req() req: Request) {
+    const sub = req.user?.sub as string;
+    const user = await this.prisma.user.findUnique({
+      where: { keycloakId: sub },
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    // Si ya está desvinculado, responde ok (idempotente)
+    if (!user.telegramChatId) return { ok: true };
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { telegramChatId: null },
+    });
+
+    return { ok: true };
   }
 }
