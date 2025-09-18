@@ -17,7 +17,7 @@ function normalizeKey(s?: string) {
   return (s || '').toString().trim().toLowerCase().replace(/\s+/g, '');
 }
 
-function parseBoolean(v: any, fallback = true): boolean {
+function parseBoolean(v: unknown, fallback = true): boolean {
   if (typeof v === 'boolean') return v;
   if (v == null) return fallback;
   const s = String(v).trim().toLowerCase();
@@ -131,6 +131,35 @@ export class AssignmentsService {
     });
   }
 
+  /**
+   * Listar todas las asignaciones activas de una urbanización.
+   * Incluye datos de usuario y sirena.
+   */
+  async findByUrbanization(urbanizationId: string, currentUser: AuthUser) {
+    const isSuperAdmin = currentUser.roles.includes(Role.SUPERADMIN);
+    const isAdmin = currentUser.roles.includes(Role.ADMIN);
+
+    if (!isSuperAdmin && !isAdmin) {
+      throw new ForbiddenException('No autorizado');
+    }
+
+    if (isAdmin && currentUser.urbanizationId !== urbanizationId) {
+      throw new ForbiddenException('Solo puedes ver tu urbanización');
+    }
+
+    return this.prisma.assignment.findMany({
+      where: {
+        active: true,
+        user: { urbanizationId },
+        siren: { urbanizationId },
+      },
+      include: {
+        user: true,
+        siren: true,
+      },
+    });
+  }
+
   // 📦 Excel helper (lee filas válidas si CUALQUIER campo relevante tiene datos)
   private async readSheet(buffer: Uint8Array | ArrayBuffer) {
     const wb = new ExcelJS.Workbook();
@@ -159,18 +188,18 @@ export class AssignmentsService {
       sheet.columnCount || 0,
     );
 
-    const rows: Record<string, any>[] = [];
+    const rows: Record<string, unknown>[] = [];
     for (let r = 2; r <= sheet.rowCount; r++) {
       const row = sheet.getRow(r);
 
       let hasData = false;
-      const obj: Record<string, any> = {};
+      const obj: Record<string, unknown> = {};
 
       for (let c = 1; c <= colCount; c++) {
         const key = headers[c];
         if (!key) continue;
 
-        let val: any = row.getCell(c).value;
+        let val: unknown = row.getCell(c).value;
         if (val && typeof val === 'object' && 'text' in (val as any)) {
           val = (val as any).text;
         }
@@ -192,7 +221,7 @@ export class AssignmentsService {
     userId: string,
     email: string,
     username: string,
-  ) {
+  ): Promise<User | null> {
     let user: User | null = null;
     if (userId) {
       user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -208,7 +237,10 @@ export class AssignmentsService {
     return user;
   }
 
-  private async resolveSirenByRefs(sirenId: string, deviceId: string) {
+  private async resolveSirenByRefs(
+    sirenId: string,
+    deviceId: string,
+  ): Promise<Siren | null> {
     let siren: Siren | null = null;
     if (sirenId) {
       siren = await this.prisma.siren.findUnique({ where: { id: sirenId } });

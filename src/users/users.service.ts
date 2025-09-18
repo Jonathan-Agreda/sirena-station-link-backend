@@ -18,9 +18,9 @@ const TEN_DIGITS = /^\d{10}$/;
 const EMAIL_REGEX =
   /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i;
 
-const toLower = (v: any) =>
+const toLower = (v: unknown) =>
   typeof v === 'string' ? v.trim().toLowerCase() : String(v ?? '');
-const asText = (v: any): string | null => {
+const asText = (v: unknown): string | null => {
   if (v === null || v === undefined) return null;
   const s = String(v);
   const trimmed = s.normalize('NFKC').replace(/\s+/g, ' ').trim();
@@ -438,6 +438,64 @@ export class UsersService {
       throw new NotFoundException('User or KeycloakId not found');
     await this.kcAdmin.deleteSession(sessionId);
     return { success: true, sessionId };
+  }
+
+  /**
+   * Listar todas las sesiones activas de los usuarios de una urbanización.
+   * Solo SUPERADMIN y ADMIN pueden acceder.
+   */
+  async listSessionsByUrbanization(
+    urbanizationId: string,
+    requestingUser: any,
+  ) {
+    const isSuper = requestingUser.roles.includes(Role.SUPERADMIN);
+    const isAdmin = requestingUser.roles.includes(Role.ADMIN);
+
+    if (!isSuper && !isAdmin) {
+      throw new ForbiddenException('No autorizado');
+    }
+
+    if (isAdmin && requestingUser.urbanizationId !== urbanizationId) {
+      throw new ForbiddenException('Solo puedes ver tu urbanización');
+    }
+
+    // Busca todos los usuarios de la urbanización
+    const users = await this.prisma.user.findMany({
+      where: { urbanizationId },
+      select: { id: true, keycloakId: true, username: true, email: true },
+    });
+
+    // Obtiene sesiones activas de cada usuario (Keycloak)
+    const sessions: Array<{
+      userId: string;
+      username: string;
+      email: string;
+      sessions: any[];
+    }> = [];
+
+    for (const user of users) {
+      if (!user.keycloakId) continue;
+      try {
+        const userSessions = await this.kcAdmin.listUserSessions(
+          user.keycloakId,
+        );
+        sessions.push({
+          userId: user.id,
+          username: user.username ?? '', // <-- Solución aquí
+          email: user.email ?? '',
+          sessions: userSessions,
+        });
+      } catch (e) {
+        sessions.push({
+          userId: user.id,
+          username: user.username ?? '', // <-- Solución aquí
+          email: user.email ?? '',
+          sessions: [],
+        });
+      }
+    }
+
+    return sessions;
   }
 
   // ========== 📦 BULK EXCEL HELPERS ==========

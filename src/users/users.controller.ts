@@ -108,6 +108,17 @@ export class UsersController {
     return this.svc.terminateSession(id, sessionId);
   }
 
+  // 🔥 Listar todas las sesiones activas de los usuarios de una urbanización (SUPERADMIN/ADMIN)
+  @Get('urbanization/:urbanizationId/sessions')
+  @Roles('SUPERADMIN', 'ADMIN')
+  listSessionsByUrbanization(
+    @Param('urbanizationId') urbanizationId: string,
+    @Req() req: Request,
+  ) {
+    const user = (req as any)['user'];
+    return this.svc.listSessionsByUrbanization(urbanizationId, user);
+  }
+
   // 🚀 BULK IMPORT USERS
   @Post('bulk/import')
   @Roles('SUPERADMIN', 'ADMIN')

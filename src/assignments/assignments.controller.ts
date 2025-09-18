@@ -71,6 +71,21 @@ export class AssignmentsController {
     return this.svc.findBySiren(sirenId, currentUser);
   }
 
+  /**
+   * Listar todas las asignaciones activas de una urbanización.
+   * Solo SUPERADMIN y ADMIN pueden acceder.
+   */
+  @Get('urbanization/:urbanizationId')
+  @Roles('SUPERADMIN', 'ADMIN')
+  async findByUrbanization(
+    @Param('urbanizationId') urbanizationId: string,
+    @Req() req: Request,
+  ) {
+    const currentUser = req['user'] as AuthUser;
+    if (!currentUser) throw new ForbiddenException('No authenticated user');
+    return this.svc.findByUrbanization(urbanizationId, currentUser);
+  }
+
   // 🚀 BULK IMPORT (Excel: userId|email|username, sirenId|deviceId, active)
   @Post('bulk/import')
   @Roles('SUPERADMIN', 'ADMIN')
